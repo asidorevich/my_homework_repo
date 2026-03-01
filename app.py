@@ -67,20 +67,17 @@ st.markdown("""
     }
 
     .metric-card {
-        background: white; border-radius: 20px; padding: 22px; 
+        background: white; border-radius: 20px; padding: 22px;
         border-left: 7px solid #ff8c42; box-shadow: 0 10px 30px rgba(0,0,0,0.07);
         margin: 12px 0;
     }
-    .low-stock {border-left-color: #ef4444 !important;}
-    .warning-stock {border-left-color: #eab308 !important;}
     .stButton>button {
         background: linear-gradient(45deg, #ff8c42, #00d4ff) !important;
-        color: white !important; border-radius: 18px !important; padding: 16px 42px !important;
+        color: white !important; border-radius: 18px !important;
         font-weight: 700 !important; font-size: 1.4rem !important;
-        box-shadow: 0 8px 25px rgba(255,140,66,0.4); transition: all 0.3s ease;
+        box-shadow: 0 8px 25px rgba(255,140,66,0.4);
     }
-    .stButton>button:hover {transform: translateY(-4px); box-shadow: 0 15px 35px rgba(255,140,66,0.5);}
-    h1,h2,h3,h4,h5 {background: linear-gradient(90deg, #ff8c42, #00d4ff);
+    h1,h2,h3,h4 {background: linear-gradient(90deg, #ff8c42, #00d4ff);
         -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: 900;}
     .stSidebar {background: linear-gradient(180deg, #ffffff, #f0f7ff) !important;}
 </style>
@@ -140,10 +137,10 @@ def rus(df, kind):
 # ===================== ЛОГО =====================
 LOGO_URL = "https://github.com/asidorevich/my_homework_repo/blob/main/logo.PNG?raw=true"
 st.markdown(f"""
-<div style="text-align:center; padding:30px 0 20px;">
-    <img src="{LOGO_URL}" width="120" style="border-radius:50%; border:6px solid #fff; box-shadow: 0 0 40px rgba(0,212,255,0.4);">
-    <h1 style="font-size:4rem; margin:15px 0 0 0;">OLYMPUS</h1>
-    <p style="font-size:1.45rem; color:#ff8c42; letter-spacing:6px;">2026</p>
+<div style="text-align:center; padding:25px 0 15px;">
+    <img src="{LOGO_URL}" width="125" style="border-radius:50%; border:6px solid #fff; box-shadow: 0 0 40px rgba(0,212,255,0.4);">
+    <h1 style="font-size:4.1rem; margin:12px 0 0 0;">OLYMPUS</h1>
+    <p style="font-size:1.4rem; color:#ff8c42; letter-spacing:5px;">2026</p>
 </div>
 """, unsafe_allow_html=True)
 

@@ -1,1544 +1,499 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
 import os
-import json
-import hashlib
-import hmac
 from datetime import datetime, date, timedelta
 from pathlib import Path
 import zipfile
 import io
 import shutil
-import plotly.express as px
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 import sqlalchemy as sa
 from sqlalchemy import create_engine, text
-import time
-import base64
-from PIL import Image
-import pytz
-import uuid
-import re
 
-# ===================== КОНФИГУРАЦИЯ =====================
+# ===================== КОНФИГ =====================
 st.set_page_config(
-    page_title="OLYMPUS 2026 • Медицинская лаборатория",
+    page_title="OLYMPUS 2026",
     page_icon="🏔️",
     layout="wide",
-    initial_sidebar_state="expanded",
-    menu_items={
-        'Get Help': 'https://github.com/asidorevich/olympus',
-        'Report a bug': 'https://github.com/asidorevich/olympus/issues',
-        'About': '# OLYMPUS 2026\nУмная система управления лабораторией'
-    }
+    initial_sidebar_state="expanded"
 )
 
-# Константы
 PHOTO_DIR = "чеки"
-LOGS_DIR = "logs"
-BACKUP_DIR = "backups"
 os.makedirs(PHOTO_DIR, exist_ok=True)
-os.makedirs(LOGS_DIR, exist_ok=True)
-os.makedirs(BACKUP_DIR, exist_ok=True)
 
-# Часовой пояс
-TZ = pytz.timezone('Asia/Almaty')
-
-# ===================== ИНИЦИАЛИЗАЦИЯ СЕССИИ =====================
-if "session_id" not in st.session_state:
-    st.session_state.session_id = str(uuid.uuid4())
-    st.session_state.theme = "light"
-    st.session_state.notifications = []
-    st.session_state.favorites = []
-    st.session_state.role = None
-    st.session_state.user = None
-    st.session_state.data = None
-
-# ===================== ФУНКЦИЯ ДЛЯ СМЕНЫ ТЕМЫ =====================
-def set_theme(theme):
-    st.session_state.theme = theme
-    st.rerun()
-
-# ===================== СТИЛИ В ЗАВИСИМОСТИ ОТ ТЕМЫ =====================
-def get_theme_styles():
-    if st.session_state.theme == "dark":
-        return """
-            <style>
-                /* Темная тема */
-                .stApp {
-                    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-                }
-                
-                .main {
-                    background: rgba(26, 26, 46, 0.95);
-                    color: #fff;
-                }
-                
-                .glass-card {
-                    background: rgba(30, 30, 46, 0.95);
-                    border: 1px solid rgba(255,255,255,0.1);
-                    color: #fff;
-                }
-                
-                .stTabs [data-baseweb="tab-list"] {
-                    background: rgba(0,0,0,0.3);
-                }
-                
-                .stTextInput > div > div > input,
-                .stSelectbox > div > div,
-                .stTextArea > div > div > textarea {
-                    background-color: #16213e !important;
-                    color: white !important;
-                    border-color: #0f3460 !important;
-                }
-                
-                h1, h2, h3, h4, h5, h6, p, span, label {
-                    color: #fff !important;
-                }
-                
-                .stMarkdown {
-                    color: #fff;
-                }
-            </style>
-        """
-    else:
-        return """
-            <style>
-                /* Светлая тема */
-                .stApp {
-                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                }
-                
-                .main {
-                    background: rgba(255, 255, 255, 0.95);
-                }
-                
-                .glass-card {
-                    background: rgba(255, 255, 255, 0.95);
-                    border: 1px solid rgba(0,0,0,0.1);
-                }
-                
-                .stTabs [data-baseweb="tab-list"] {
-                    background: rgba(255,255,255,0.1);
-                }
-                
-                .stTextInput > div > div > input,
-                .stSelectbox > div > div,
-                .stTextArea > div > div > textarea {
-                    background-color: white !important;
-                }
-                
-                h1, h2, h3, h4, h5, h6, p, span, label {
-                    color: #1a1a2e !important;
-                }
-            </style>
-        """
-
-# ===================== ОСНОВНЫЕ СТИЛИ =====================
+# ===================== КРУПНЫЕ ТАБЫ + МОБИЛЬНАЯ АДАПТАЦИЯ =====================
 st.markdown("""
 <style>
-    /* Глобальные стили */
-    @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800&display=swap');
-    
-    * {
-        font-family: 'Montserrat', sans-serif;
+    .main, .stApp {background: linear-gradient(135deg, #f8faff 0%, #e6f3ff 100%); color: #1a2a44;}
+    html, body, [class*="css"] {font-size: 19px !important;}
+
+    /* КРУПНЫЕ ТАБЫ */
+    div[data-testid="stTabs"] > div[role="tablist"] {
+        gap: 20px !important;
+        justify-content: center;
+        flex-wrap: wrap;
     }
-    
-    .stApp {
-        background-attachment: fixed;
+    div[data-testid="stTabs"] button {
+        font-size: 1.75rem !important;
+        font-weight: 700 !important;
+        padding: 22px 40px !important;
+        border-radius: 22px !important;
+        min-width: 170px;
+        box-shadow: 0 8px 25px rgba(0,0,0,0.1);
+        transition: all 0.3s ease;
     }
-    
-    /* Основной контейнер */
-    .main {
-        backdrop-filter: blur(10px);
-        border-radius: 30px 30px 0 0;
-        padding: 20px;
-        margin-top: 20px;
-        box-shadow: 0 -20px 40px rgba(0,0,0,0.1);
+    div[data-testid="stTabs"] button:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 15px 35px rgba(255,140,66,0.3);
     }
-    
-    /* Красивые карточки */
-    .glass-card {
-        backdrop-filter: blur(10px);
-        border-radius: 20px;
-        padding: 25px;
-        box-shadow: 0 20px 40px rgba(0,0,0,0.1);
-        transition: transform 0.3s ease, box-shadow 0.3s ease;
-        margin-bottom: 20px;
-    }
-    
-    .glass-card:hover {
-        transform: translateY(-5px);
-        box-shadow: 0 30px 60px rgba(0,0,0,0.15);
-    }
-    
-    /* Метрики */
-    .metric-card {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        border-radius: 15px;
-        padding: 20px;
-        text-align: center;
-        box-shadow: 0 10px 30px rgba(102, 126, 234, 0.3);
-        margin: 5px;
-    }
-    
-    .metric-value {
-        font-size: 2.5rem;
-        font-weight: 800;
-        line-height: 1.2;
-    }
-    
-    .metric-label {
-        font-size: 1rem;
-        opacity: 0.9;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-    }
-    
-    /* Анимированные кнопки */
-    .stButton > button {
-        background: linear-gradient(45deg, #667eea, #764ba2) !important;
+    div[data-testid="stTabs"] button[data-state="active"] {
+        background: linear-gradient(45deg, #ff8c42, #00d4ff) !important;
         color: white !important;
-        border: none !important;
-        border-radius: 50px !important;
-        padding: 12px 30px !important;
-        font-weight: 600 !important;
-        font-size: 1rem !important;
-        transition: all 0.3s ease !important;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3) !important;
+        transform: scale(1.05);
     }
-    
-    .stButton > button:hover {
-        transform: translateY(-2px) scale(1.05);
-        box-shadow: 0 15px 30px rgba(102, 126, 234, 0.4) !important;
-    }
-    
-    .stButton > button:active {
-        transform: translateY(0) scale(0.95);
-    }
-    
-    /* Табы */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 10px;
-        padding: 10px;
-        border-radius: 50px;
-        backdrop-filter: blur(10px);
-        margin-bottom: 20px;
-    }
-    
-    .stTabs [data-baseweb="tab"] {
-        border-radius: 40px !important;
-        padding: 10px 25px !important;
-        font-weight: 600 !important;
-        transition: all 0.3s ease !important;
-    }
-    
-    .stTabs [aria-selected="true"] {
-        background: linear-gradient(45deg, #667eea, #764ba2) !important;
-        color: white !important;
-    }
-    
-    /* Анимации загрузки */
-    @keyframes pulse {
-        0% { transform: scale(1); }
-        50% { transform: scale(1.05); }
-        100% { transform: scale(1); }
-    }
-    
-    .loading {
-        animation: pulse 2s infinite;
-    }
-    
-    /* Уведомления */
-    .custom-success {
-        background: linear-gradient(45deg, #10b981, #059669);
-        color: white;
-        padding: 15px;
-        border-radius: 10px;
-        margin: 10px 0;
-        animation: slideIn 0.5s ease;
-    }
-    
-    .custom-error {
-        background: linear-gradient(45deg, #ef4444, #dc2626);
-        color: white;
-        padding: 15px;
-        border-radius: 10px;
-        margin: 10px 0;
-        animation: slideIn 0.5s ease;
-    }
-    
-    @keyframes slideIn {
-        from {
-            transform: translateX(-100%);
-            opacity: 0;
-        }
-        to {
-            transform: translateX(0);
-            opacity: 1;
-        }
-    }
-    
-    /* Прогресс-бары */
-    .progress-container {
-        width: 100%;
-        background: #e0e0e0;
-        border-radius: 10px;
-        overflow: hidden;
-        margin: 10px 0;
-    }
-    
-    .progress-bar {
-        height: 20px;
-        background: linear-gradient(45deg, #667eea, #764ba2);
-        transition: width 1s ease;
-        border-radius: 10px;
-    }
-    
-    /* Мобильная адаптация */
+
+    /* МОБИЛЬНАЯ ВЕРСИЯ */
     @media (max-width: 768px) {
-        .main {
-            padding: 10px;
+        div[data-testid="stTabs"] button {
+            font-size: 1.55rem !important;
+            padding: 18px 26px !important;
+            min-width: 140px;
         }
-        
-        .metric-value {
-            font-size: 1.8rem;
+        .stButton>button {
+            font-size: 1.45rem !important;
+            padding: 18px 32px !important;
         }
-        
-        .stButton > button {
-            padding: 8px 20px !important;
-            font-size: 0.9rem !important;
-        }
-        
-        .stTabs [data-baseweb="tab"] {
-            padding: 8px 15px !important;
-            font-size: 0.9rem !important;
-        }
+        h1 {font-size: 2.9rem !important;}
+        .metric-card {padding: 18px !important;}
     }
-    
-    /* Стили для сайдбара */
-    .css-1d391kg, .css-12oz5g7 {
-        background: linear-gradient(180deg, #ffffff, #f0f7ff) !important;
+
+    .metric-card {
+        background: white; border-radius: 20px; padding: 22px;
+        border-left: 7px solid #ff8c42; box-shadow: 0 10px 30px rgba(0,0,0,0.07);
+        margin: 12px 0;
     }
-    
-    /* Стили для data editor */
-    .stDataFrame {
-        border-radius: 10px;
-        overflow: hidden;
+    .stButton>button {
+        background: linear-gradient(45deg, #ff8c42, #00d4ff) !important;
+        color: white !important; border-radius: 18px !important;
+        font-weight: 700 !important; font-size: 1.4rem !important;
+        box-shadow: 0 8px 25px rgba(255,140,66,0.4);
     }
-    
-    /* Стили для expander */
-    .streamlit-expanderHeader {
-        border-radius: 10px !important;
-    }
+    h1,h2,h3,h4 {background: linear-gradient(90deg, #ff8c42, #00d4ff);
+        -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: 900;}
+    .stSidebar {background: linear-gradient(180deg, #ffffff, #f0f7ff) !important;}
 </style>
 """, unsafe_allow_html=True)
 
-# Применяем тему
-st.markdown(get_theme_styles(), unsafe_allow_html=True)
-
-# ===================== БЕЗОПАСНОСТЬ И ЛОГИРОВАНИЕ =====================
-def hash_password(password):
-    """Хеширование пароля"""
-    salt = os.urandom(32)
-    key = hashlib.pbkdf2_hmac(
-        'sha256',
-        password.encode('utf-8'),
-        salt,
-        100000
-    )
-    return salt + key
-
-def verify_password(password, hashed):
-    """Проверка пароля"""
-    salt = hashed[:32]
-    key = hashed[32:]
-    new_key = hashlib.pbkdf2_hmac(
-        'sha256',
-        password.encode('utf-8'),
-        salt,
-        100000
-    )
-    return hmac.compare_digest(key, new_key)
-
-def log_action(action, user, details=""):
-    """Логирование действий"""
-    try:
-        log_entry = {
-            "timestamp": datetime.now(TZ).isoformat(),
-            "user": user,
-            "action": action,
-            "details": details,
-            "session_id": st.session_state.get("session_id", str(uuid.uuid4()))
-        }
-        
-        log_file = Path(LOGS_DIR) / f"log_{date.today().isoformat()}.json"
-        
-        if log_file.exists():
-            with open(log_file, "r", encoding="utf-8") as f:
-                logs = json.load(f)
-        else:
-            logs = []
-        
-        logs.append(log_entry)
-        
-        with open(log_file, "w", encoding="utf-8") as f:
-            json.dump(logs, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        print(f"Ошибка логирования: {e}")
-
-# ===================== БАЗА ДАННЫХ =====================
+# ===================== БАЗА =====================
 @st.cache_resource
 def get_engine():
-    """Получение движка БД с кешированием"""
-    try:
-        return create_engine(
-            st.secrets["db_url"],
-            pool_size=20,
-            max_overflow=0,
-            pool_pre_ping=True,
-            pool_recycle=3600
-        )
-    except Exception as e:
-        st.error(f"Ошибка подключения к базе данных: {str(e)}")
-        return None
+    return create_engine(st.secrets["db_url"])
 
 def get_raw(table):
-    """Безопасное получение данных"""
-    try:
-        engine = get_engine()
-        if engine:
-            with engine.connect() as conn:
-                return pd.read_sql(f"SELECT * FROM {table}", conn)
-        return pd.DataFrame()
-    except Exception as e:
-        st.error(f"Ошибка загрузки {table}: {str(e)}")
-        return pd.DataFrame()
+    with get_engine().connect() as conn:
+        return pd.read_sql(f"SELECT * FROM {table}", conn)
 
 def save_raw(table, df):
-    """Безопасное сохранение данных"""
-    try:
-        engine = get_engine()
-        if engine:
-            with engine.connect() as conn:
-                df.to_sql(table, conn, if_exists="replace", index=False)
-                conn.commit()
-            return True
-        return False
-    except Exception as e:
-        st.error(f"Ошибка сохранения {table}: {str(e)}")
-        return False
+    with get_engine().connect() as conn:
+        df.to_sql(table, conn, if_exists="replace", index=False)
+        conn.commit()
 
 def delete_all_from_table(table):
-    """Безопасное удаление данных"""
-    try:
-        engine = get_engine()
-        if engine:
-            with engine.connect() as conn:
-                conn.execute(text(f"DELETE FROM {table}"))
-                conn.commit()
-            return True
-        return False
-    except Exception as e:
-        st.error(f"Ошибка удаления {table}: {str(e)}")
-        return False
+    with get_engine().connect() as conn:
+        conn.execute(text(f"DELETE FROM {table}"))
+        conn.commit()
 
-# ===================== ЗАГРУЗКА ДАННЫХ =====================
-@st.cache_data(ttl=300)
-def load_all_data():
-    """Загрузка всех данных с кешированием"""
-    return {
-        "purchases": get_raw("purchases"),
-        "stock": get_raw("stock"),
-        "orders": get_raw("orders"),
-        "last_update": datetime.now(TZ).isoformat()
+# ===================== ДАННЫЕ =====================
+def load_all_data(force=False):
+    if "data" not in st.session_state or force:
+        st.session_state.data = {
+            "purchases": get_raw("purchases"),
+            "stock": get_raw("stock"),
+            "orders": get_raw("orders")
+        }
+
+load_all_data()
+purchases = st.session_state.data["purchases"]
+stock = st.session_state.data["stock"]
+orders = st.session_state.data["orders"]
+
+# ===================== РУССКИЕ ЗАГОЛОВКИ =====================
+def rus(df, kind):
+    if df.empty: return df
+    maps = {
+        "purchases": {"rename": {"date":"Дата","item":"Товар","category":"Категория","qty":"Кол-во","unit":"Ед.изм",
+                                "price":"Цена за ед., ₸","total":"Сумма, ₸","supplier":"Поставщик",
+                                "comment":"Комментарий","photo":"Чек","added_by":"Кем добавлено"},
+                     "order": ["Дата","Товар","Категория","Кол-во","Ед.изм","Цена за ед., ₸","Сумма, ₸","Поставщик","Комментарий","Чек","Кем добавлено"]},
+        "stock": {"rename": {"item":"Товар","category":"Категория","unit":"Ед.изм","quantity":"Остаток","min_qty":"Минимум"},
+                  "order": ["Товар","Категория","Ед.изм","Остаток","Минимум"]},
+        "orders": {"rename": {"item":"Товар","qty":"Кол-во","unit":"Ед.изм","comment":"Комментарий",
+                             "ordered_by":"Кем заказано","ordered_at":"Когда","status":"Статус"},
+                   "order": ["Когда","Товар","Кол-во","Ед.изм","Комментарий","Кем заказано","Статус"]}
     }
+    m = maps.get(kind, {"rename":{}, "order":[]})
+    df = df.rename(columns=m["rename"])
+    return df[[c for c in m["order"] if c in df.columns]]
 
-# ===================== ЛОГОТИП И ЗАГОЛОВОК =====================
+# ===================== ЛОГО =====================
 LOGO_URL = "https://github.com/asidorevich/my_homework_repo/blob/main/logo.PNG?raw=true"
-
 st.markdown(f"""
-<div style="text-align: center; padding: 30px 0;">
-    <div style="display: inline-block; position: relative;">
-        <img src="{LOGO_URL}" style="width: 150px; height: 150px; border-radius: 50%; 
-             border: 5px solid white; box-shadow: 0 20px 40px rgba(0,0,0,0.2); 
-             animation: pulse 2s infinite;">
-        <div style="position: absolute; bottom: 0; right: 0; 
-                    background: linear-gradient(45deg, #667eea, #764ba2);
-                    color: white; padding: 5px 15px; border-radius: 20px;
-                    font-size: 0.9rem; font-weight: 600;">
-            v2.0
-        </div>
-    </div>
-    <h1 style="font-size: 4rem; margin: 20px 0 10px; 
-               background: linear-gradient(45deg, #667eea, #764ba2);
-               -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-               text-shadow: 0 10px 20px rgba(102,126,234,0.3);">
-        OLYMPUS
-    </h1>
-    <p style="font-size: 1.2rem; color: #667eea; letter-spacing: 5px;
-              text-transform: uppercase; font-weight: 600;">
-        2026 • Медицинская лаборатория
-    </p>
+<div style="text-align:center; padding:25px 0 15px;">
+    <img src="{LOGO_URL}" width="125" style="border-radius:50%; border:6px solid #fff; box-shadow: 0 0 40px rgba(0,212,255,0.4);">
+    <h1 style="font-size:4.1rem; margin:12px 0 0 0;">OLYMPUS</h1>
+    <p style="font-size:1.4rem; color:#ff8c42; letter-spacing:5px;">2026</p>
 </div>
 """, unsafe_allow_html=True)
 
 # ===================== АВТОРИЗАЦИЯ =====================
+if "role" not in st.session_state:
+    st.session_state.role = None
+
 if st.session_state.role is None:
-    col1, col2, col3 = st.columns([1, 2, 1])
-    
-    with col2:
-        with st.form("login_form"):
-            st.markdown("""
-            <div style="text-align: center; margin-bottom: 30px;">
-                <h2 style="color: #667eea;">🔐 Вход в систему</h2>
-                <p style="color: #666;">Введите свои учетные данные</p>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            role = st.selectbox(
-                "Выберите роль",
-                ["👩‍⚕️ Медсестра", "📦 Снабжение", "👑 Администратор"],
-                index=0
-            )
-            
-            username = st.text_input("👤 Имя пользователя", placeholder="Введите имя")
-            password = st.text_input("🔑 Пароль", type="password", placeholder="Введите пароль")
-            
-            col_btn1, col_btn2, col_btn3 = st.columns([1, 2, 1])
-            with col_btn2:
-                submitted = st.form_submit_button("🚀 ВОЙТИ", use_container_width=True)
-            
-            if submitted:
-                valid_credentials = {
-                    "👩‍⚕️ Медсестра": {"username": "nurse", "password": "med123", "role": "med"},
-                    "📦 Снабжение": {"username": "snab", "password": "olympus2025", "role": "snab"},
-                    "👑 Администратор": {"username": "admin", "password": "godmode2026", "role": "admin"}
-                }
-                
-                cred = valid_credentials.get(role)
-                if cred and username == cred["username"] and password == cred["password"]:
-                    st.session_state.role = cred["role"]
-                    st.session_state.user = username
-                    st.session_state.login_time = datetime.now(TZ).isoformat()
-                    st.session_state.data = load_all_data()
-                    
-                    log_action("LOGIN", username, f"Вход как {role}")
-                    
-                    st.success(f"✅ Добро пожаловать, {username}!")
-                    time.sleep(1)
-                    st.rerun()
-                else:
-                    st.error("❌ Неверное имя пользователя или пароль")
-    
+    c1, c2, c3 = st.columns([1,2,1])
+    with c2:
+        st.markdown("<h2 style='text-align:center; color:#ff8c42;'>Вход в систему</h2>", unsafe_allow_html=True)
+        role = st.selectbox("Роль", ["Медсестра (списание)", "Снабжение (закупки)", "🔐 Администратор"])
+        pwd = st.text_input("Пароль", type="password")
+        if st.button("🔑 ВОЙТИ", use_container_width=True, type="primary"):
+            if role == "Медсестра (списание)" and pwd == "med123":
+                st.session_state.role = "med"
+            elif role == "Снабжение (закупки)" and pwd == "olympus2025":
+                st.session_state.role = "snab"
+            elif role == "🔐 Администратор" and pwd == "godmode2026":
+                st.session_state.role = "admin"
+            else:
+                st.error("❌ Неверный пароль")
+            st.rerun()
     st.stop()
 
-# ===================== ЗАГРУЗКА ДАННЫХ ПОСЛЕ АВТОРИЗАЦИИ =====================
-if st.session_state.data is None:
-    with st.spinner("Загрузка данных..."):
-        st.session_state.data = load_all_data()
-
-data = st.session_state.data
-
 # ===================== САЙДБАР =====================
-with st.sidebar:
-    st.image(LOGO_URL, width=100)
-    
-    st.markdown(f"""
-    <div style="text-align: center; margin: 20px 0;">
-        <p style="color: #667eea; font-weight: 600; font-size: 1.2rem;">👤 {st.session_state.user}</p>
-        <p style="font-size: 0.9rem; color: #666;">
-            {datetime.now(TZ).strftime("%d.%m.%Y %H:%M")}
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Метрики в сайдбаре
-    total_spent = data["purchases"]["total"].sum() if not data["purchases"].empty else 0
-    critical_items = len(data["stock"][data["stock"]["quantity"] <= data["stock"]["min_qty"]]) if not data["stock"].empty else 0
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        st.metric("💰 Всего потрачено", f"{total_spent:,.0f} ₸")
-    with col2:
-        st.metric("⚠️ Критических", critical_items)
-    
-    st.divider()
-    
-    # Быстрые действия
-    st.markdown("### ⚡ Быстрые действия")
-    
-    if st.button("🔄 Обновить данные", use_container_width=True):
-        with st.spinner("Обновление..."):
-            st.cache_data.clear()
-            st.session_state.data = load_all_data()
-            st.toast("✅ Данные обновлены!", icon="🔄")
-            time.sleep(0.5)
-            st.rerun()
-    
-    # Экспорт отчета
-    report_buffer = io.BytesIO()
-    with pd.ExcelWriter(report_buffer, engine='openpyxl') as writer:
-        for name, df in data.items():
-            if isinstance(df, pd.DataFrame) and not df.empty:
-                df.to_excel(writer, sheet_name=name[:31], index=False)
-    
-    st.download_button(
-        "📥 Скачать отчет",
-        report_buffer.getvalue(),
-        f"report_{date.today().isoformat()}.xlsx",
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=True
-    )
-    
-    # Смена темы
-    st.markdown("### 🎨 Тема")
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("🌞 Светлая", use_container_width=True):
-            set_theme("light")
-    with col2:
-        if st.button("🌙 Темная", use_container_width=True):
-            set_theme("dark")
-    
-    st.divider()
-    
-    if st.button("🚪 Выйти", use_container_width=True, type="secondary"):
-        log_action("LOGOUT", st.session_state.user, "Выход из системы")
-        st.session_state.role = None
-        st.session_state.user = None
-        st.session_state.data = None
-        st.cache_data.clear()
-        st.rerun()
+total = purchases["total"].sum() if not purchases.empty and "total" in purchases.columns else 0
+st.sidebar.image(LOGO_URL, width=140)
+st.sidebar.metric("Всего потрачено", f"{total:,.0f} ₸")
 
-# ===================== ОСНОВНОЙ ИНТЕРФЕЙС =====================
-# Функция для создания метрик
-def create_metric_card(value, label, color=None):
-    color_style = f"background: {color};" if color else ""
-    return f"""
-    <div class="metric-card" style="{color_style}">
-        <div class="metric-value">{value}</div>
-        <div class="metric-label">{label}</div>
-    </div>
-    """
+if st.sidebar.button("🔄 Обновить все данные", type="primary", use_container_width=True):
+    load_all_data(force=True)
+    st.toast("✅ Данные обновлены!", icon="🔄")
+    st.rerun()
 
-# МЕДСЕСТРА
+if st.sidebar.button("🚪 Выйти", use_container_width=True):
+    st.session_state.role = None
+    st.rerun()
+
+# ===================== МЕДСЕСТРА =====================
 if st.session_state.role == "med":
-    st.markdown("## 👩‍⚕️ Панель медсестры")
-    
-    tabs = st.tabs([
-        "🏠 Главная",
-        "📦 Склад",
-        "📉 Списание",
-        "📨 Заявки",
-        "📊 Аналитика"
-    ])
-    
-    # Главная
-    with tabs[0]:
-        with st.container():
-            st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-            st.subheader("📊 Панель управления")
-            
-            col1, col2, col3, col4 = st.columns(4)
-            
-            with col1:
-                st.metric("Позиций на складе", len(data["stock"]))
-            
-            with col2:
-                pending_orders = len(data["orders"][data["orders"]["status"] == "new"])
-                st.metric("Активных заявок", pending_orders)
-            
-            with col3:
-                low_stock = len(data["stock"][data["stock"]["quantity"] <= data["stock"]["min_qty"]])
-                st.metric("Критических остатков", low_stock)
-            
-            with col4:
-                today_usage = len(data["purchases"][
-                    (pd.to_datetime(data["purchases"]["date"]).dt.date == date.today()) & 
-                    (data["purchases"]["item"].str.contains("СПИСАНО"))
-                ]) if not data["purchases"].empty else 0
-                st.metric("Списаний сегодня", today_usage)
-            
-            st.divider()
-            
-            if low_stock > 0:
-                st.error(f"⚠️ Обнаружено {low_stock} позиций с критическим остатком!")
-                
-                critical = data["stock"][data["stock"]["quantity"] <= data["stock"]["min_qty"]].copy()
-                for _, item in critical.iterrows():
-                    percent = min((item["quantity"] / item["min_qty"]) * 100, 100)
-                    col1, col2 = st.columns([3, 1])
-                    with col1:
-                        st.progress(percent/100, text=f"**{item['item']}**")
-                    with col2:
-                        st.write(f"{item['quantity']} / {item['min_qty']} {item['unit']}")
-            
-            st.markdown('</div>', unsafe_allow_html=True)
-    
-    # Склад
-    with tabs[1]:
-        with st.container():
-            st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-            st.subheader("📦 Текущие остатки")
-            
-            if not data["stock"].empty:
-                # Поиск
-                search = st.text_input("🔍 Поиск по названию", placeholder="Введите название товара...")
-                
-                # Фильтр по категориям
-                categories = ["Все"] + sorted(data["stock"]["category"].unique().tolist())
-                category = st.selectbox("📂 Категория", categories)
-                
-                # Фильтрация
-                filtered_df = data["stock"].copy()
-                if search:
-                    filtered_df = filtered_df[filtered_df["item"].str.contains(search, case=False, na=False)]
-                if category != "Все":
-                    filtered_df = filtered_df[filtered_df["category"] == category]
-                
-                # Отображение
-                for _, item in filtered_df.iterrows():
-                    status = "🟢" if item["quantity"] > item["min_qty"] else "🔴"
-                    col1, col2, col3 = st.columns([3, 1, 1])
-                    with col1:
-                        st.write(f"{status} **{item['item']}**")
-                        st.caption(f"{item['category']}")
-                    with col2:
-                        st.write(f"**{item['quantity']}** {item['unit']}")
-                    with col3:
-                        st.write(f"Мин: {item['min_qty']}")
-                    st.divider()
-            else:
-                st.info("📭 Склад пуст")
-            
-            st.markdown('</div>', unsafe_allow_html=True)
-    
-    # Списание
-    with tabs[2]:
-        with st.container():
-            st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-            st.subheader("📉 Списание материалов")
-            
-            if not data["stock"].empty:
-                with st.form("write_off_form"):
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        item = st.selectbox(
-                            "Выберите товар",
-                            options=sorted(data["stock"]["item"].tolist())
-                        )
-                        
-                        if item:
-                            item_info = data["stock"][data["stock"]["item"] == item].iloc[0]
-                            st.info(f"📦 Доступно: **{item_info['quantity']} {item_info['unit']}**")
-                            
-                            qty = st.number_input(
-                                "Количество",
-                                min_value=0.1,
-                                max_value=float(item_info['quantity']),
-                                step=0.1,
-                                format="%.1f"
-                            )
-                    
-                    with col2:
-                        patient = st.text_input("👤 Пациент / № анализа")
-                        reason = st.selectbox(
-                            "📋 Причина",
-                            ["Использование", "Брак", "Порча", "Истечение срока", "Другое"]
-                        )
-                        comment = st.text_area("📝 Комментарий")
-                    
-                    submitted = st.form_submit_button("✅ СПИСАТЬ", use_container_width=True)
-                    
-                    if submitted and qty > 0:
-                        # Обновляем остатки
-                        data["stock"].loc[data["stock"]["item"] == item, "quantity"] -= qty
-                        
-                        if save_raw("stock", data["stock"]):
-                            # Добавляем запись в историю
-                            new_entry = pd.DataFrame([{
-                                "date": date.today().isoformat(),
-                                "item": f"[СПИСАНО] {item}",
-                                "category": item_info["category"],
-                                "qty": qty,
-                                "unit": item_info["unit"],
-                                "price": 0,
-                                "total": 0,
-                                "supplier": "",
-                                "comment": f"{reason}: {patient} - {comment}" if comment else f"{reason}: {patient}",
-                                "photo": "",
-                                "added_by": st.session_state.user
-                            }])
-                            
-                            data["purchases"] = pd.concat([data["purchases"], new_entry], ignore_index=True)
-                            save_raw("purchases", data["purchases"])
-                            
-                            st.success(f"✅ Списано {qty} {item_info['unit']} {item}")
-                            time.sleep(1)
-                            st.rerun()
-            else:
-                st.info("📭 Нет товаров для списания")
-            
-            st.markdown('</div>', unsafe_allow_html=True)
-    
-    # Заявки
-    with tabs[3]:
-        with st.container():
-            st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-            st.subheader("📨 Создание заявки")
-            
-            with st.form("order_form"):
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    item = st.text_input("📦 Что нужно?", placeholder="Например: Перчатки нитриловые M")
-                    qty = st.number_input("🔢 Количество", min_value=1, step=1)
-                
-                with col2:
-                    unit = st.selectbox("📏 Единица измерения", ["шт", "упак", "коробка", "пара", "литр", "кг"])
-                    priority = st.select_slider(
-                        "⚡ Приоритет",
-                        options=["Низкий", "Средний", "Высокий", "Критический"],
-                        value="Средний"
-                    )
-                
-                comment = st.text_area("📝 Комментарий")
-                
-                submitted = st.form_submit_button("📨 ОТПРАВИТЬ ЗАЯВКУ", use_container_width=True)
-                
-                if submitted and item.strip():
-                    new_order = pd.DataFrame([{
-                        "item": item.strip(),
-                        "qty": qty,
-                        "unit": unit,
-                        "comment": f"{priority}: {comment}" if comment else priority,
-                        "ordered_by": st.session_state.user,
-                        "ordered_at": datetime.now(TZ).isoformat(),
-                        "status": "new",
-                        "priority": priority
-                    }])
-                    
-                    data["orders"] = pd.concat([data["orders"], new_order], ignore_index=True)
-                    
-                    if save_raw("orders", data["orders"]):
-                        st.success("✅ Заявка отправлена!")
-                        time.sleep(1)
-                        st.rerun()
-            
-            st.divider()
-            
-            # История заявок
-            st.subheader("📋 История ваших заявок")
-            user_orders = data["orders"][data["orders"]["ordered_by"] == st.session_state.user]
-            
-            if not user_orders.empty:
-                for _, order in user_orders.iterrows():
-                    status_emoji = {
-                        "new": "🟡",
-                        "done": "🟢",
-                        "rejected": "🔴"
-                    }.get(order["status"], "⚪")
-                    
-                    with st.expander(f"{status_emoji} {order['item']} - {order['qty']} {order['unit']}"):
-                        st.write(f"**Статус:** {order['status']}")
-                        st.write(f"**Дата:** {order['ordered_at'][:16]}")
-                        if order.get('comment'):
-                            st.write(f"**Комментарий:** {order['comment']}")
-            else:
-                st.info("😕 У вас пока нет заявок")
-            
-            st.markdown('</div>', unsafe_allow_html=True)
-    
-    # Аналитика
-    with tabs[4]:
-        with st.container():
-            st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-            st.subheader("📊 Аналитика расхода")
-            
-            if not data["purchases"].empty:
-                # Фильтруем только списания
-                write_offs = data["purchases"][data["purchases"]["item"].str.contains("СПИСАНО")].copy()
-                
-                if not write_offs.empty:
-                    write_offs["date"] = pd.to_datetime(write_offs["date"])
-                    write_offs["month"] = write_offs["date"].dt.strftime("%Y-%m")
-                    
-                    # График по месяцам
-                    monthly = write_offs.groupby("month")["qty"].sum().reset_index()
-                    fig = px.line(monthly, x="month", y="qty", title="Динамика списаний")
-                    st.plotly_chart(fig, use_container_width=True)
-                    
-                    # Топ расходуемых
-                    st.subheader("📈 Топ расходуемых товаров")
-                    top_items = write_offs.groupby("item")["qty"].sum().sort_values(ascending=False).head(10)
-                    fig = px.bar(
-                        x=top_items.values,
-                        y=top_items.index,
-                        orientation='h',
-                        title="Самые популярные товары"
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
-                else:
-                    st.info("😕 Нет данных о списаниях")
-            else:
-                st.info("😕 Недостаточно данных для аналитики")
-            
-            st.markdown('</div>', unsafe_allow_html=True)
+    t1, t2, t3, t4 = st.tabs(["🏠 Дашборд", "📦 Остатки", "📉 Списание", "📨 Заявка"])
 
-# СНАБЖЕНИЕ
+    with t1:
+        st.subheader("📊 Главная панель")
+        crit = stock[stock["quantity"] <= stock["min_qty"]]
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Критически мало", len(crit))
+        col2.metric("Всего позиций", len(stock))
+        col3.metric("Общий остаток", f"{stock['quantity'].sum():,.0f}")
+        if not crit.empty:
+            st.subheader("⚠️ Проблемные позиции")
+            for _, row in crit.iterrows():
+                st.error(f"**{row['item']}** — осталось **{row['quantity']} {row['unit']}** (минимум {row['min_qty']})")
+
+    with t2:
+        st.subheader("Текущие остатки на складе")
+        q = st.text_input("🔍 Поиск по товару", key="search_med")
+        df = stock.copy()
+        if q: df = df[df["item"].str.contains(q, case=False, na=False)]
+        st.dataframe(rus(df, "stock"), use_container_width=True, hide_index=True)
+        if not crit.empty:
+            st.error(f"Критически мало: {len(crit)} позиций")
+            st.dataframe(rus(crit, "stock"), use_container_width=True, hide_index=True)
+
+    with t3:
+        st.subheader("Списание со склада")
+        with st.form("spis", clear_on_submit=True):
+            item = st.selectbox("Выберите товар", options=sorted(stock["item"]))
+            current_qty = stock.loc[stock["item"] == item, "quantity"].iloc[0]
+            unit = stock.loc[stock["item"] == item, "unit"].iloc[0]
+            st.info(f"Доступно: **{current_qty}** {unit}")
+            qty = st.number_input("Списать количество", min_value=0.01, step=0.01)
+            com = st.text_input("Пациент / № анализа")
+            if st.form_submit_button("СПИСАТЬ", type="primary", use_container_width=True):
+                if qty > current_qty:
+                    st.error(f"Недостаточно! Остаток: {current_qty}")
+                else:
+                    stock.loc[stock["item"] == item, "quantity"] -= qty
+                    save_raw("stock", stock)
+                    new = pd.DataFrame([{"date": date.today().strftime("%Y-%m-%d"), "item": f"[СПИСАНО] {item}",
+                                         "category": "Списание", "qty": qty, "unit": unit,
+                                         "price": 0, "total": 0, "supplier": "", "comment": com, "photo": "", "added_by": "Медсестра"}])
+                    save_raw("purchases", pd.concat([purchases, new], ignore_index=True))
+                    load_all_data(force=True)
+                    st.toast(f"✅ Списано {qty} × {item}", icon="🗑️")
+                    st.balloons()
+                    st.rerun()
+
+    with t4:
+        st.subheader("Создать заявку на закупку")
+        with st.form("order", clear_on_submit=True):
+            item = st.text_input("Что нужно купить?", placeholder="Например: Перчатки нитриловые размер M")
+            qty = st.number_input("Количество", min_value=1, step=1)
+            unit = st.selectbox("Ед. изм.", ["шт", "упак", "коробка", "литр", "пара", "рулон"])
+            com = st.text_area("Комментарий (по желанию)")
+            if st.form_submit_button("ОТПРАВИТЬ ЗАЯВКУ", type="primary", use_container_width=True):
+                if not item.strip():
+                    st.error("Укажите товар")
+                else:
+                    new_o = pd.DataFrame([{"item": item.strip(), "qty": qty, "unit": unit, "comment": com,
+                                           "ordered_by": "Медсестра",
+                                           "ordered_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                                           "status": "new"}])
+                    save_raw("orders", pd.concat([orders, new_o], ignore_index=True))
+                    load_all_data(force=True)
+                    st.toast("✅ Заявка отправлена!", icon="📨")
+                    st.balloons()
+                    st.rerun()
+
+# ===================== СНАБЖЕНИЕ =====================
 elif st.session_state.role == "snab":
-    st.markdown("## 📦 Панель снабжения")
-    
-    tabs = st.tabs([
-        "🏠 Дашборд",
-        "📨 Заявки",
-        "🛒 Закупки",
-        "📦 Склад",
-        "📈 Аналитика",
-        "🖼 Чеки"
-    ])
-    
-    # Дашборд
-    with tabs[0]:
-        with st.container():
-            st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-            st.subheader("🏠 Панель управления")
-            
-            col1, col2, col3, col4 = st.columns(4)
-            
-            with col1:
-                pending_orders = len(data["orders"][data["orders"]["status"] == "new"])
-                st.metric("Новых заявок", pending_orders)
-            
-            with col2:
-                total_purchases = len(data["purchases"])
-                st.metric("Всего закупок", total_purchases)
-            
-            with col3:
-                total_spent = data["purchases"]["total"].sum() if not data["purchases"].empty else 0
-                st.metric("💰 Потрачено", f"{total_spent:,.0f} ₸")
-            
-            with col4:
-                unique_suppliers = data["purchases"]["supplier"].nunique() if not data["purchases"].empty else 0
-                st.metric("Поставщиков", unique_suppliers)
-            
-            st.divider()
-            
-            # Последние заявки
-            st.subheader("📨 Последние заявки")
-            recent_orders = data["orders"][data["orders"]["status"] == "new"].head(5)
-            
-            if not recent_orders.empty:
-                for _, order in recent_orders.iterrows():
-                    with st.container():
-                        col1, col2, col3 = st.columns([3, 2, 1])
-                        with col1:
-                            st.write(f"**{order['item']}**")
-                            st.caption(f"от {order['ordered_by']}")
-                        with col2:
-                            st.write(f"{order['qty']} {order['unit']}")
-                        with col3:
-                            priority_color = {
-                                "Низкий": "🟢",
-                                "Средний": "🟡",
-                                "Высокий": "🟠",
-                                "Критический": "🔴"
-                            }.get(order.get("priority", "Средний"), "⚪")
-                            st.write(priority_color)
-                        st.divider()
-            else:
-                st.success("✅ Нет новых заявок")
-            
-            st.markdown('</div>', unsafe_allow_html=True)
-    
-    # Заявки
-    with tabs[1]:
-        with st.container():
-            st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-            st.subheader("📨 Управление заявками")
-            
-            # Фильтры
+    t1,t2,t3,t4,t5,t6 = st.tabs(["📨 Заявки","🛒 Закупка","📜 История","📦 Склад","📈 Аналитика","🖼 Чеки"])
+
+    with t1:
+        st.subheader("Новые заявки от медсестёр")
+        if st.button("🔄 ОБНОВИТЬ ЗАЯВКИ", use_container_width=True, type="primary"):
+            load_all_data(force=True)
+            st.toast("✅ Заявки обновлены!", icon="🔄")
+            st.rerun()
+        pending = orders[orders["status"] == "new"]
+        if pending.empty:
+            st.success("Нет активных заявок")
+        else:
+            st.dataframe(rus(pending.copy(), "orders"), use_container_width=True, hide_index=True)
+            for idx, row in pending.iterrows():
+                with st.expander(f"{row['item']} — {row['qty']} {row['unit']}"):
+                    st.caption(f"От: {row['ordered_by']} | {row['ordered_at']}")
+                    if row.get('comment'): st.write(row['comment'])
+                    c1, c2 = st.columns(2)
+                    if c1.button("✅ Выполнено", key=f"done_{idx}", use_container_width=True):
+                        orders.loc[idx, "status"] = "done"
+                        save_raw("orders", orders)
+                        load_all_data(force=True)
+                        st.toast("✅ Отмечено как выполнено", icon="✅")
+                        st.rerun()
+                    if c2.button("❌ Отклонить", key=f"rej_{idx}", use_container_width=True):
+                        orders.loc[idx, "status"] = "rejected"
+                        save_raw("orders", orders)
+                        load_all_data(force=True)
+                        st.toast("❌ Заявка отклонена", icon="❌")
+                        st.rerun()
+
+    with t2:
+        st.subheader("Добавить новую закупку")
+        with st.form("buy", clear_on_submit=True):
             col1, col2 = st.columns(2)
             with col1:
-                status_filter = st.selectbox(
-                    "📊 Статус",
-                    ["Все", "new", "done", "rejected"]
-                )
+                item = st.text_input("Название товара")
+                cat = st.selectbox("Категория", ["Расходный материал","Канцелярия","Пробирки","Хозтовары","Прочее"])
+                qty = st.number_input("Количество", min_value=1)
+                unit = st.selectbox("Ед.изм.", ["шт","упак","коробка","рулон"])
             with col2:
-                search = st.text_input("🔍 Поиск", placeholder="Поиск по товару...")
-            
-            # Фильтрация
-            filtered_orders = data["orders"].copy()
-            if status_filter != "Все":
-                filtered_orders = filtered_orders[filtered_orders["status"] == status_filter]
-            if search:
-                filtered_orders = filtered_orders[filtered_orders["item"].str.contains(search, case=False, na=False)]
-            
-            if not filtered_orders.empty:
-                for idx, order in filtered_orders.iterrows():
-                    with st.expander(f"📦 {order['item']} - {order['qty']} {order['unit']}"):
-                        col1, col2 = st.columns(2)
-                        
-                        with col1:
-                            st.write(f"**От:** {order['ordered_by']}")
-                            st.write(f"**Когда:** {order['ordered_at'][:16]}")
-                            if order.get('comment'):
-                                st.write(f"**Комментарий:** {order['comment']}")
-                        
-                        with col2:
-                            if order["status"] == "new":
-                                if st.button("✅ Выполнить", key=f"done_{idx}", use_container_width=True):
-                                    filtered_orders.loc[idx, "status"] = "done"
-                                    if save_raw("orders", filtered_orders):
-                                        st.session_state.data = load_all_data()
-                                        st.success("✅ Заявка выполнена!")
-                                        st.rerun()
-                                
-                                if st.button("🔄 В работу", key=f"work_{idx}", use_container_width=True):
-                                    st.session_state["order_to_purchase"] = {
-                                        "item": order["item"],
-                                        "qty": order["qty"],
-                                        "unit": order["unit"],
-                                        "comment": order.get("comment", "")
-                                    }
-                                    st.success("📝 Данные перенесены в закупку!")
-            else:
-                st.info("😕 Заявок не найдено")
-            
-            st.markdown('</div>', unsafe_allow_html=True)
-    
-    # Закупки
-    with tabs[2]:
-        with st.container():
-            st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-            st.subheader("🛒 Добавление закупки")
-            
-            default_data = st.session_state.get("order_to_purchase", {})
-            
-            with st.form("purchase_form"):
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    item = st.text_input(
-                        "📦 Товар *",
-                        value=default_data.get("item", "")
-                    )
-                    
-                    category = st.selectbox(
-                        "📂 Категория",
-                        ["Расходный материал", "Канцелярия", "Пробирки", "Хозтовары", "Прочее"]
-                    )
-                    
-                    qty = st.number_input(
-                        "🔢 Количество *",
-                        min_value=1,
-                        value=int(default_data.get("qty", 1))
-                    )
-                    
-                    unit = st.selectbox(
-                        "📏 Единица измерения",
-                        ["шт", "упак", "коробка", "рулон", "литр", "кг"],
-                        index=["шт", "упак", "коробка", "рулон", "литр", "кг"].index(default_data.get("unit", "шт")) 
-                        if default_data.get("unit") in ["шт", "упак", "коробка", "рулон", "литр", "кг"] else 0
-                    )
-                
-                with col2:
-                    price = st.number_input("💰 Цена за единицу *", min_value=0.0, step=10.0)
-                    supplier = st.text_input("🏭 Поставщик")
-                    purchase_date = st.date_input("📅 Дата закупки", value=date.today())
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    no_track = st.checkbox("❌ Не учитывать на складе")
-                with col2:
-                    urgent = st.checkbox("⚡ Срочная закупка")
-                
-                files = st.file_uploader(
-                    "📎 Прикрепить документы",
-                    accept_multiple_files=True,
-                    type=["png", "jpg", "jpeg", "pdf"]
-                )
-                
-                comment = st.text_area(
-                    "📝 Комментарий",
-                    value=default_data.get("comment", "")
-                )
-                
-                submitted = st.form_submit_button("💾 СОХРАНИТЬ ЗАКУПКУ", use_container_width=True)
-                
-                if submitted:
-                    if not item or qty <= 0 or price <= 0:
-                        st.error("❌ Заполните все обязательные поля (отмечены *)")
-                    else:
-                        # Сохраняем файлы
-                        paths = []
-                        if files:
-                            for f in files:
-                                safe_name = f"{date.today()}_{item}_{f.name}".replace(" ", "_")
-                                safe_name = re.sub(r'[^\w\-_\.]', '', safe_name)
-                                path = os.path.join(PHOTO_DIR, safe_name)
-                                
-                                with open(path, "wb") as out:
-                                    out.write(f.getbuffer())
-                                paths.append(path)
-                        
-                        # Создаем запись
-                        new_purchase = pd.DataFrame([{
-                            "date": purchase_date.isoformat(),
-                            "item": item,
-                            "category": category,
-                            "qty": qty,
-                            "unit": unit,
-                            "price": price,
-                            "total": qty * price,
-                            "supplier": supplier,
-                            "comment": f"{'СРОЧНО! ' if urgent else ''}{comment}",
-                            "photo": ";".join(paths) if paths else "",
-                            "added_by": st.session_state.user
-                        }])
-                        
-                        data["purchases"] = pd.concat([data["purchases"], new_purchase], ignore_index=True)
-                        
-                        if save_raw("purchases", data["purchases"]):
-                            # Обновляем склад
-                            if not no_track:
-                                if item in data["stock"]["item"].values:
-                                    data["stock"].loc[data["stock"]["item"] == item, "quantity"] += qty
-                                else:
-                                    new_stock = pd.DataFrame([{
-                                        "item": item,
-                                        "category": category,
-                                        "unit": unit,
-                                        "quantity": qty,
-                                        "min_qty": 5
-                                    }])
-                                    data["stock"] = pd.concat([data["stock"], new_stock], ignore_index=True)
-                                
-                                save_raw("stock", data["stock"])
-                            
-                            if "order_to_purchase" in st.session_state:
-                                del st.session_state["order_to_purchase"]
-                            
-                            st.session_state.data = load_all_data()
-                            st.success("✅ Закупка добавлена!")
-                            time.sleep(1)
-                            st.rerun()
-            
-            st.divider()
-            
-            # Последние закупки
-            st.subheader("📋 Последние закупки")
-            if not data["purchases"].empty:
-                recent = data["purchases"].sort_values("date", ascending=False).head(10)
-                st.dataframe(
-                    recent[["date", "item", "qty", "unit", "total", "supplier"]],
-                    use_container_width=True,
-                    hide_index=True
-                )
-            
-            st.markdown('</div>', unsafe_allow_html=True)
-    
-    # Склад
-    with tabs[3]:
-        with st.container():
-            st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-            st.subheader("📦 Управление складом")
-            
-            if not data["stock"].empty:
-                edited_stock = st.data_editor(
-                    data["stock"],
-                    use_container_width=True,
-                    num_rows="dynamic",
-                    column_config={
-                        "item": "Товар",
-                        "category": "Категория",
-                        "unit": "Ед.изм",
-                        "quantity": st.column_config.NumberColumn("Остаток", min_value=0),
-                        "min_qty": st.column_config.NumberColumn("Минимум", min_value=0)
-                    }
-                )
-                
-                if st.button("💾 Сохранить изменения", type="primary", use_container_width=True):
-                    if save_raw("stock", edited_stock):
-                        st.session_state.data = load_all_data()
-                        st.success("✅ Изменения сохранены!")
-                        st.rerun()
-            else:
-                st.info("📭 Склад пуст")
-            
-            st.markdown('</div>', unsafe_allow_html=True)
-    
-    # Аналитика
-    with tabs[4]:
-        with st.container():
-            st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-            st.subheader("📈 Аналитика")
-            
-            if not data["purchases"].empty:
-                purchases = data["purchases"].copy()
-                purchases["date"] = pd.to_datetime(purchases["date"])
-                
-                # Выбор периода
-                col1, col2 = st.columns(2)
-                with col1:
-                    start_date = st.date_input(
-                        "Начало",
-                        value=date.today() - timedelta(days=30)
-                    )
-                with col2:
-                    end_date = st.date_input(
-                        "Конец",
-                        value=date.today()
-                    )
-                
-                # Фильтрация
-                mask = (purchases["date"].dt.date >= start_date) & (purchases["date"].dt.date <= end_date)
-                filtered = purchases[mask]
-                
-                if not filtered.empty:
-                    # Метрики
-                    col1, col2, col3, col4 = st.columns(4)
-                    with col1:
-                        st.metric("💰 Всего", f"{filtered['total'].sum():,.0f} ₸")
-                    with col2:
-                        st.metric("📊 Средний чек", f"{filtered['total'].mean():,.0f} ₸")
-                    with col3:
-                        st.metric("📦 Закупок", len(filtered))
-                    with col4:
-                        st.metric("📋 Позиций", filtered["item"].nunique())
-                    
-                    st.divider()
-                    
-                    # Графики
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        # По категориям
-                        cat_stats = filtered.groupby("category")["total"].sum()
-                        fig = px.pie(
-                            values=cat_stats.values,
-                            names=cat_stats.index,
-                            title="Распределение по категориям"
-                        )
-                        st.plotly_chart(fig, use_container_width=True)
-                    
-                    with col2:
-                        # По поставщикам
-                        supp_stats = filtered.groupby("supplier")["total"].sum().nlargest(10)
-                        fig = px.bar(
-                            x=supp_stats.values,
-                            y=supp_stats.index,
-                            orientation='h',
-                            title="Топ поставщиков"
-                        )
-                        st.plotly_chart(fig, use_container_width=True)
-                    
-                    # Динамика
-                    daily = filtered.groupby(filtered["date"].dt.strftime("%Y-%m-%d"))["total"].sum().reset_index()
-                    fig = px.line(daily, x="date", y="total", title="Динамика расходов")
-                    st.plotly_chart(fig, use_container_width=True)
-                else:
-                    st.info("😕 Нет данных за выбранный период")
-            else:
-                st.info("😕 Недостаточно данных для аналитики")
-            
-            st.markdown('</div>', unsafe_allow_html=True)
-    
-    # Чеки
-    with tabs[5]:
-        with st.container():
-            st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-            st.subheader("🖼 Галерея чеков")
-            
-            # Загрузка
-            with st.expander("📤 Загрузить новые чеки"):
-                uploaded_files = st.file_uploader(
-                    "Выберите файлы",
-                    accept_multiple_files=True,
-                    type=["png", "jpg", "jpeg", "pdf"]
-                )
-                
-                if uploaded_files and st.button("💾 Сохранить все", use_container_width=True):
-                    for f in uploaded_files:
-                        safe_name = f"{date.today()}_{f.name}".replace(" ", "_")
-                        safe_name = re.sub(r'[^\w\-_\.]', '', safe_name)
+                price = st.number_input("Цена за единицу, ₸", min_value=0.0)
+                supplier = st.text_input("Поставщик")
+            no_track = st.checkbox("Не учитывать на складе (не расходник)")
+            files = st.file_uploader("Прикрепить чек/договор", accept_multiple_files=True, type=["png","jpg","jpeg","pdf"])
+            if st.form_submit_button("ДОБАВИТЬ ЗАКУПКУ", type="primary", use_container_width=True):
+                total_price = qty * price
+                paths = ""
+                if files:
+                    for f in files:
+                        safe_name = f"{date.today()}_{item}_{f.name}".replace(" ", "_")
+                        safe_name = "".join(c for c in safe_name if c.isalnum() or c in "._-")
                         path = os.path.join(PHOTO_DIR, safe_name)
-                        
-                        with open(path, "wb") as out:
-                            out.write(f.getbuffer())
-                    
-                    st.success(f"✅ Сохранено {len(uploaded_files)} файлов!")
-                    st.rerun()
-            
-            st.divider()
-            
-            # Отображение
-            files = sorted(Path(PHOTO_DIR).iterdir(), key=lambda x: x.stat().st_mtime, reverse=True)
-            
-            if files:
-                cols = st.columns(3)
-                for i, f in enumerate(files[:12]):
-                    with cols[i % 3]:
-                        if f.suffix.lower() in [".png", ".jpg", ".jpeg"]:
-                            st.image(str(f), use_container_width=True)
-                        else:
-                            st.markdown(f"📄 {f.name}")
-                        
-                        if st.button("🗑️", key=f"del_{f.name}"):
-                            f.unlink()
-                            st.rerun()
-            else:
-                st.info("😕 Нет загруженных чеков")
-            
-            st.markdown('</div>', unsafe_allow_html=True)
+                        with open(path, "wb") as out: out.write(f.getbuffer())
+                        paths += path + ";"
+                new_row = pd.DataFrame([{
+                    "date": date.today().strftime("%Y-%m-%d"), "item": item, "category": cat,
+                    "qty": qty, "unit": unit, "price": price, "total": total_price,
+                    "supplier": supplier, "comment": "НЕ НА СКЛАДЕ" if no_track else "",
+                    "photo": paths, "added_by": "Снабжение"
+                }])
+                new_purch = pd.concat([purchases, new_row], ignore_index=True)
+                save_raw("purchases", new_purch)
+                if not no_track:
+                    if item in stock["item"].values:
+                        stock.loc[stock["item"] == item, "quantity"] += qty
+                    else:
+                        new_stock = pd.DataFrame([{"item":item, "category":cat, "unit":unit, "quantity":qty, "min_qty":5}])
+                        stock = pd.concat([stock, new_stock], ignore_index=True)
+                    save_raw("stock", stock)
+                load_all_data(force=True)
+                st.toast("✅ Закупка добавлена!", icon="🛒")
+                st.balloons()
+                st.rerun()
 
-# АДМИНИСТРАТОР
-else:
-    st.markdown("## 👑 Админ-панель")
-    
-    tabs = st.tabs([
-        "📊 Обзор",
-        "👥 Пользователи",
-        "✏️ Редактор",
-        "💾 Бэкапы",
-        "📈 Логи",
-        "⚙️ Настройки"
-    ])
-    
-    # Обзор
-    with tabs[0]:
-        with st.container():
-            st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-            st.subheader("📊 Системный обзор")
-            
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("Закупок", len(data["purchases"]))
-            with col2:
-                st.metric("Товаров", len(data["stock"]))
-            with col3:
-                st.metric("Заявок", len(data["orders"]))
-            with col4:
-                st.metric("Активных", 1)
-            
-            st.divider()
-            
-            # Статус
-            col1, col2 = st.columns(2)
-            with col1:
-                st.markdown("### 🟢 Статус")
-                st.markdown(f"- **БД:** ✅ Подключено")
-                st.markdown(f"- **Файлы:** ✅ {len(list(Path(PHOTO_DIR).glob('*')))} файлов")
-            
-            with col2:
-                total_size = sum(f.stat().st_size for f in Path(PHOTO_DIR).glob("*")) / 1024 / 1024
-                st.markdown("### 💾 Использование")
-                st.markdown(f"- **Место:** {total_size:.1f} MB")
-                st.markdown(f"- **Записей:** {len(data['purchases']) + len(data['stock']) + len(data['orders'])}")
-            
-            st.markdown('</div>', unsafe_allow_html=True)
-    
-    # Пользователи
-    with tabs[1]:
-        with st.container():
-            st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-            st.subheader("👥 Управление пользователями")
-            
-            users = pd.DataFrame([
-                {"username": "nurse", "role": "med", "status": "active"},
-                {"username": "snab", "role": "snab", "status": "active"},
-                {"username": "admin", "role": "admin", "status": "active"}
-            ])
-            
-            edited_users = st.data_editor(
-                users,
-                use_container_width=True,
-                num_rows="dynamic",
-                column_config={
-                    "username": "Имя",
-                    "role": st.column_config.SelectboxColumn(
-                        "Роль",
-                        options=["med", "snab", "admin"]
-                    ),
-                    "status": st.column_config.SelectboxColumn(
-                        "Статус",
-                        options=["active", "blocked"]
-                    )
-                }
-            )
-            
-            st.markdown('</div>', unsafe_allow_html=True)
-    
-    # Редактор
-    with tabs[2]:
-        with st.container():
-            st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-            st.subheader("✏️ Редактор данных")
-            
-            table = st.selectbox(
-                "Выберите таблицу",
-                ["purchases", "stock", "orders"]
-            )
-            
-            if table in data:
-                edited_df = st.data_editor(
-                    data[table],
-                    use_container_width=True,
-                    num_rows="dynamic"
-                )
-                
-                if st.button("💾 Сохранить", type="primary", use_container_width=True):
-                    if save_raw(table, edited_df):
-                        st.session_state.data = load_all_data()
-                        st.success("✅ Сохранено!")
-                        st.rerun()
-            
-            st.markdown('</div>', unsafe_allow_html=True)
-    
-    # Бэкапы
-    with tabs[3]:
-        with st.container():
-            st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-            st.subheader("💾 Бэкапы")
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                if st.button("📦 Создать бэкап", use_container_width=True, type="primary"):
-                    with st.spinner("Создание бэкапа..."):
-                        backup_name = f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
-                        backup_path = Path(BACKUP_DIR) / backup_name
-                        
-                        with zipfile.ZipFile(backup_path, 'w', zipfile.ZIP_DEFLATED) as zf:
-                            for t in ["purchases", "stock", "orders"]:
-                                df = data[t]
-                                zf.writestr(f"{t}.csv", df.to_csv(index=False))
-                            
-                            for f in Path(PHOTO_DIR).glob("*"):
-                                zf.write(f, f"чеки/{f.name}")
-                            
-                            for f in Path(LOGS_DIR).glob("*"):
-                                zf.write(f, f"логи/{f.name}")
-                        
-                        st.success(f"✅ Бэкап создан")
-                        
-                        with open(backup_path, "rb") as f:
-                            st.download_button(
-                                "📥 Скачать",
-                                f.read(),
-                                backup_name,
-                                "application/zip",
-                                use_container_width=True
-                            )
-            
-            with col2:
-                st.subheader("📋 История")
-                backups = sorted(Path(BACKUP_DIR).glob("*.zip"), key=lambda x: x.stat().st_mtime, reverse=True)
-                for b in backups[:5]:
-                    size = b.stat().st_size / 1024 / 1024
-                    st.markdown(f"- {b.name} ({size:.1f} MB)")
-            
-            st.markdown('</div>', unsafe_allow_html=True)
-    
-    # Логи
-    with tabs[4]:
-        with st.container():
-            st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-            st.subheader("📈 Системные логи")
-            
-            log_file = Path(LOGS_DIR) / f"log_{date.today().isoformat()}.json"
-            
-            if log_file.exists():
-                with open(log_file, "r", encoding="utf-8") as f:
-                    logs = json.load(f)
-                
-                if logs:
-                    logs_df = pd.DataFrame(logs)
-                    st.dataframe(logs_df, use_container_width=True, hide_index=True)
-                else:
-                    st.info("Логи пусты")
-            else:
-                st.info("Нет логов за сегодня")
-            
-            st.markdown('</div>', unsafe_allow_html=True)
-    
-    # Настройки
-    with tabs[5]:
-        with st.container():
-            st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-            st.subheader("⚙️ Настройки системы")
-            
-            with st.form("settings_form"):
-                st.markdown("### 🔐 Безопасность")
-                session_timeout = st.number_input("Таймаут сессии (минут)", 5, 120, 30)
-                max_attempts = st.number_input("Макс. попыток входа", 3, 10, 5)
-                
-                st.markdown("### 📁 Хранение")
-                max_file_size = st.number_input("Макс. размер файла (MB)", 1, 50, 10)
-                
-                if st.form_submit_button("💾 Сохранить", use_container_width=True):
-                    st.success("✅ Настройки сохранены!")
-            
-            st.markdown('</div>', unsafe_allow_html=True)
+    with t3:
+        st.subheader("История всех закупок")
+        st.dataframe(rus(purchases.copy(), "purchases"), use_container_width=True, hide_index=True)
 
-# ===================== ОПАСНАЯ ЗОНА ДЛЯ АДМИНА =====================
-if st.session_state.role == "admin":
-    st.divider()
-    
-    with st.expander("☢️ ОПАСНАЯ ЗОНА", expanded=False):
-        st.warning("⚠️ Эти действия необратимы!")
-        
-        col1, col2 = st.columns(2)
-        
+    with t4:
+        st.subheader("Ручное управление остатками")
+        edited = st.data_editor(rus(stock.copy(), "stock"), use_container_width=True, num_rows="dynamic")
+        if st.button("💾 Сохранить изменения", type="primary"):
+            rev_map = {"Товар":"item","Категория":"category","Ед.изм":"unit","Остаток":"quantity","Минимум":"min_qty"}
+            edited_eng = edited.rename(columns=rev_map)
+            save_raw("stock", edited_eng)
+            load_all_data(force=True)
+            st.toast("✅ Остатки сохранены!", icon="💾")
+            st.rerun()
+
+    with t5:
+        st.subheader("Аналитика расходов")
+        if purchases.empty:
+            st.info("Пока нет ни одной закупки")
+            st.stop()
+        purchases["date_dt"] = pd.to_datetime(purchases["date"], errors="coerce")
+        purchases = purchases.dropna(subset=["date_dt"])
+        col1, col2 = st.columns([1, 3])
         with col1:
-            st.subheader("🗑 Очистка таблицы")
-            table_to_clear = st.selectbox(
-                "Выберите таблицу",
-                ["purchases", "stock", "orders"],
-                key="clear_table"
-            )
-            
-            confirm = st.text_input("Введите 'DELETE' для подтверждения", key="confirm_delete")
-            
-            if st.button(f"🗑 ОЧИСТИТЬ {table_to_clear}", use_container_width=True):
-                if confirm == "DELETE":
-                    if delete_all_from_table(table_to_clear):
-                        st.session_state.data = load_all_data()
-                        st.success(f"✅ Таблица {table_to_clear} очищена!")
-                        st.rerun()
-        
+            years = sorted(purchases["date_dt"].dt.year.unique(), reverse=True)
+            selected_year = st.selectbox("Год", options=years, index=0)
         with col2:
-            st.subheader("💥 Полное уничтожение")
-            st.error("Удалит ВСЕ данные навсегда!")
-            
-            confirm1 = st.text_input("Введите 'GODMODE'", type="password", key="godmode")
-            confirm2 = st.checkbox("Я понимаю последствия", key="understand")
-            
-            if st.button("☢️ УНИЧТОЖИТЬ ВСЁ", use_container_width=True):
-                if confirm1 == "GODMODE" and confirm2:
-                    for t in ["purchases", "stock", "orders"]:
-                        delete_all_from_table(t)
-                    
-                    if os.path.exists(PHOTO_DIR):
-                        shutil.rmtree(PHOTO_DIR)
-                        os.makedirs(PHOTO_DIR)
-                    
-                    st.session_state.data = load_all_data()
-                    st.success("💥 Все данные уничтожены!")
-                    time.sleep(2)
-                    st.rerun()
+            months_available = sorted(purchases[purchases["date_dt"].dt.year == selected_year]["date_dt"].dt.month.unique())
+            month_names = [date(1900, m, 1).strftime("%B") for m in months_available]
+            selected_month_name = st.selectbox("Месяц", options=month_names, index=0)
+            selected_month = months_available[month_names.index(selected_month_name)]
+        selected_period = f"{selected_year}-{selected_month:02d}"
+        month_data = purchases[purchases["date_dt"].dt.strftime("%Y-%m") == selected_period].copy()
+        if month_data.empty:
+            st.warning(f"В {selected_month_name} {selected_year} закупок не было")
+            st.stop()
+        total_spent = month_data["total"].sum()
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Всего потрачено", f"{total_spent:,.0f} ₸")
+        c2.metric("Количество закупок", len(month_data))
+        c3.metric("Средний чек", f"{total_spent / len(month_data):,.0f} ₸")
+        c4.metric("Уникальных позиций", month_data["item"].nunique())
+        st.markdown("---")
+        st.subheader("Расходы по категориям")
+        cat = month_data.groupby("category")["total"].sum().sort_values(ascending=False)
+        cat_df = cat.reset_index()
+        cat_df["Доля"] = (cat_df["total"] / total_spent * 100).round(1).map("{:.1f}%".format)
+        cat_df["total"] = cat_df["total"].apply(lambda x: f"{x:,.0f} ₸")
+        col1, col2 = st.columns([2, 1])
+        with col1: st.bar_chart(cat, use_container_width=True)
+        with col2:
+            cat_df = cat_df.rename(columns={"category": "Категория", "total": "Сумма"})
+            st.dataframe(cat_df[["Категория", "Сумма", "Доля"]], use_container_width=True, hide_index=True)
+        st.subheader("Топ-10 самых дорогих закупок")
+        top10 = month_data.groupby(["item", "category", "supplier", "price"], as_index=False)["total"].sum()
+        top10 = top10.sort_values("total", ascending=False).head(10)
+        top10["total"] = top10["total"].apply(lambda x: f"{x:,.0f} ₸")
+        top10["price"] = top10["price"].apply(lambda x: f"{x:,.0f} ₸")
+        top10 = top10.rename(columns={"item": "Товар", "category": "Категория", "supplier": "Поставщик", "price": "Цена за ед.", "total": "Итого"})
+        st.dataframe(top10[["Товар", "Категория", "Поставщик", "Цена за ед.", "Итого"]], use_container_width=True, hide_index=True)
+        st.subheader("Расходы по поставщикам")
+        supp = month_data.groupby("supplier")["total"].sum().sort_values(ascending=False)
+        supp_df = supp.reset_index()
+        supp_df["total"] = supp_df["total"].apply(lambda x: f"{x:,.0f} ₸")
+        supp_df = supp_df.rename(columns={"supplier": "Поставщик", "total": "Сумма"})
+        col1, col2 = st.columns([2, 1])
+        with col1: st.bar_chart(supp, use_container_width=True)
+        with col2: st.dataframe(supp_df, use_container_width=True, hide_index=True)
+        st.subheader(f"Все закупки за {selected_month_name} {selected_year}")
+        detail = month_data.copy()
+        detail["Дата"] = detail["date_dt"].dt.strftime("%d.%m.%Y")
+        detail = detail[["Дата", "item", "category", "qty", "unit", "price", "total", "supplier"]]
+        detail["price"] = detail["price"].apply(lambda x: f"{x:,.0f}")
+        detail["total"] = detail["total"].apply(lambda x: f"{x:,.0f} ₸")
+        detail = detail.rename(columns={"item": "Товар", "category": "Категория", "qty": "Кол-во", "unit": "Ед.изм", "price": "Цена за ед., ₸", "supplier": "Поставщик"})
+        st.dataframe(detail, use_container_width=True, hide_index=True)
+        csv = detail.to_csv(index=False, encoding="utf-8-sig")
+        st.download_button("Скачать месяц в Excel", csv, f"Закупки_{selected_period}.csv", "text/csv", use_container_width=True)
 
-# ===================== ФУТЕР =====================
+    with t6:
+        st.subheader("Последние чеки и документы")
+        files = sorted(Path(PHOTO_DIR).iterdir(), key=lambda x: x.stat().st_mtime, reverse=True)[:40]
+        cols = st.columns(4)
+        for i, f in enumerate(files):
+            with cols[i % 4]:
+                name = f.name.split("_", 2)[-1] if "_" in f.name else f.name
+                st.caption(name[:30])
+                if f.suffix.lower() in [".png",".jpg",".jpeg"]:
+                    st.image(str(f), use_container_width=True)
+                else:
+                    with open(f, "rb") as pdf_file:
+                        st.download_button("Скачать", pdf_file.read(), file_name=f.name, key=str(f))
+
+# ===================== АДМИН =====================
+else:
+    st.title("🔐 АДМИН-ПАНЕЛЬ • GOD MODE 2026")
+    atabs = st.tabs(["📊 Обзор", "✏️ Редактировать данные", "🗑 Опасная зона", "💾 Бэкап"])
+
+    with atabs[0]:
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Закупок всего", len(purchases))
+        col2.metric("Позиций на складе", len(stock))
+        col3.metric("Активных заявок", len(orders[orders["status"] == "new"]))
+
+    with atabs[1]:
+        table_choice = st.selectbox("Выберите таблицу", ["purchases", "stock", "orders"])
+        df_edit = st.data_editor(get_raw(table_choice), num_rows="dynamic", use_container_width=True)
+        if st.button("💾 Сохранить изменения", type="primary"):
+            save_raw(table_choice, df_edit)
+            load_all_data(force=True)
+            st.toast("✅ Таблица сохранена!", icon="💾")
+            st.rerun()
+
+    with atabs[2]:
+        st.subheader("🗑 Очистка одной таблицы")
+        table_to_clear = st.selectbox("Таблица", ["purchases", "stock", "orders"])
+        if st.button(f"🗑 ОЧИСТИТЬ {table_to_clear.upper()}", type="primary"):
+            if st.checkbox("Я понимаю, что это необратимо"):
+                delete_all_from_table(table_to_clear)
+                load_all_data(force=True)
+                st.toast(f"✅ {table_to_clear} полностью очищена!", icon="🗑")
+                st.rerun()
+
+        st.divider()
+        st.subheader("☢️ УДАЛИТЬ ВСЮ БАЗУ")
+        st.warning("Удалит ВСЁ навсегда!")
+        confirm1 = st.text_input("Напишите GODMODE")
+        confirm2 = st.checkbox("Я осознаю, что данные будут удалены НАВСЕГДА")
+        if st.button("☢️ УНИЧТОЖИТЬ ВСЮ БАЗУ", type="primary"):
+            if confirm1 == "GODMODE" and confirm2:
+                for t in ["purchases", "stock", "orders"]:
+                    delete_all_from_table(t)
+                if os.path.exists(PHOTO_DIR):
+                    shutil.rmtree(PHOTO_DIR)
+                    os.makedirs(PHOTO_DIR)
+                load_all_data(force=True)
+                st.toast("💥 ВСЯ БАЗА УНИЧТОЖЕНА", icon="☢️")
+                st.rerun()
+
+    with atabs[3]:
+        if st.button("📦 Создать полный бэкап (таблицы + чеки)"):
+            zip_buffer = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+                for t in ["purchases", "stock", "orders"]:
+                    df = get_raw(t)
+                    zf.writestr(f"{t}.csv", df.to_csv(index=False))
+                for f in Path(PHOTO_DIR).glob("*"):
+                    zf.write(f, f"чеки/{f.name}")
+            zip_buffer.seek(0)
+            st.download_button("⬇️ Скачать backup.zip", zip_buffer.getvalue(),
+                               f"OLYMPUS_FULL_BACKUP_{date.today()}.zip", "application/zip", use_container_width=True)
+
+        st.subheader("🖼 Управление чеками")
+        files = sorted(Path(PHOTO_DIR).iterdir(), key=lambda x: x.stat().st_mtime, reverse=True)
+        for f in files[:30]:
+            col1, col2 = st.columns([4,1])
+            col1.caption(f.name)
+            if f.suffix.lower() in [".png",".jpg",".jpeg"]:
+                col1.image(str(f), use_container_width=True)
+            if col2.button("🗑 Удалить", key=f"del_{f.name}"):
+                f.unlink()
+                st.toast(f"Удалён {f.name}", icon="🗑")
+                st.rerun()
+
 st.markdown("""
-<div style="text-align: center; padding: 30px 0 20px; color: #666;">
-    <hr style="margin: 20px 0; border: none; height: 1px; background: linear-gradient(90deg, transparent, #667eea, transparent);">
-    <p>© 2026 КДЛ OLYMPUS • Умная система управления лабораторией</p>
+<div style='text-align:center; padding:60px 0 30px; color:#64748b; font-size:1rem;'>
+    © 2026 КДЛ OLYMPUS • GOD MODE ACTIVATED
 </div>
 """, unsafe_allow_html=True)

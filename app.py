@@ -8,11 +8,18 @@ import io
 import shutil
 import sqlalchemy as sa
 from sqlalchemy import create_engine, text
-import plotly.express as px
-import plotly.graph_objects as go
 from typing import Optional, Dict, Any
 import hashlib
 import json
+
+# Попытка импорта plotly (с обработкой ошибки)
+try:
+    import plotly.express as px
+    import plotly.graph_objects as go
+    PLOTLY_AVAILABLE = True
+except ImportError:
+    PLOTLY_AVAILABLE = False
+    st.warning("Plotly не установлен. Графики будут отображаться в упрощенном виде.")
 
 # ===================== КОНФИГ =====================
 st.set_page_config(
@@ -35,7 +42,7 @@ st.markdown("""
     }
     
     .main, .stApp {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        background: linear-gradient(135deg, #f8faff 0%, #e6f3ff 100%);
         color: #1a2a44;
     }
     
@@ -580,6 +587,31 @@ def show_sidebar():
                     }.get(notif["type"], "📌")
                     st.markdown(f"{emoji} {notif['message']}")
 
+# ===================== ФУНКЦИИ ДЛЯ ГРАФИКОВ (АЛЬТЕРНАТИВА PLOTLY) =====================
+def create_bar_chart(data, title, x_label, y_label):
+    """Создание столбчатой диаграммы с помощью st.bar_chart"""
+    if isinstance(data, pd.Series):
+        chart_data = pd.DataFrame({y_label: data.values}, index=data.index)
+    else:
+        chart_data = data
+    
+    st.bar_chart(chart_data, use_container_width=True)
+    st.caption(f"{title} ({x_label} - {y_label})")
+
+def create_pie_chart(data, title):
+    """Создание круговой диаграммы (упрощенная версия)"""
+    if isinstance(data, pd.Series):
+        # Показываем как таблицу с процентами
+        total = data.sum()
+        df_pie = pd.DataFrame({
+            'Категория': data.index,
+            'Сумма': data.values,
+            'Доля': (data.values / total * 100).round(1).astype(str) + '%'
+        })
+        st.dataframe(df_pie, use_container_width=True, hide_index=True)
+    else:
+        st.write(data)
+
 # ===================== МЕДСЕСТРА =====================
 def med_interface():
     """Интерфейс медсестры"""
@@ -797,9 +829,9 @@ def med_interface():
 # ===================== СНАБЖЕНИЕ =====================
 def snab_interface():
     """Интерфейс снабжения"""
-    t1, t2, t3, t4, t5, t6, t7 = st.tabs([
+    t1, t2, t3, t4, t5, t6 = st.tabs([
         "📨 Заявки", "🛒 Закупка", "📜 История", "📦 Склад", 
-        "📈 Аналитика", "🖼 Чеки", "📊 Отчеты"
+        "📈 Аналитика", "🖼 Чеки"
     ])
     
     with t1:
@@ -996,18 +1028,19 @@ def snab_interface():
             with col3:
                 supplier_filter = st.multiselect(
                     "Поставщик",
-                    options=sorted(purchases["supplier"].unique())
+                    options=sorted(purchases["supplier"].unique()) if "supplier" in purchases.columns else []
                 )
             
             # Применяем фильтры
             filtered = purchases.copy()
-            filtered["date_dt"] = pd.to_datetime(filtered["date"])
-            filtered = filtered[
-                (filtered["date_dt"].dt.date >= start_date) &
-                (filtered["date_dt"].dt.date <= end_date)
-            ]
+            if "date" in filtered.columns:
+                filtered["date_dt"] = pd.to_datetime(filtered["date"])
+                filtered = filtered[
+                    (filtered["date_dt"].dt.date >= start_date) &
+                    (filtered["date_dt"].dt.date <= end_date)
+                ]
             
-            if supplier_filter:
+            if supplier_filter and "supplier" in filtered.columns:
                 filtered = filtered[filtered["supplier"].isin(supplier_filter)]
             
             # Отображаем
@@ -1081,8 +1114,9 @@ def snab_interface():
             st.info("Нет данных для аналитики")
         else:
             # Подготовка данных
-            purchases["date_dt"] = pd.to_datetime(purchases["date"])
-            purchases = purchases.dropna(subset=["date_dt"])
+            if "date" in purchases.columns:
+                purchases["date_dt"] = pd.to_datetime(purchases["date"])
+                purchases = purchases.dropna(subset=["date_dt"])
             
             # Выбор периода
             col1, col2 = st.columns(2)
@@ -1099,30 +1133,36 @@ def snab_interface():
                         value=date.today() - timedelta(days=30)
                     )
                     end_date = st.date_input("Конец", value=date.today())
-                    filtered = purchases[
-                        (purchases["date_dt"].dt.date >= start_date) &
-                        (purchases["date_dt"].dt.date <= end_date)
-                    ]
+                    if "date_dt" in purchases.columns:
+                        filtered = purchases[
+                            (purchases["date_dt"].dt.date >= start_date) &
+                            (purchases["date_dt"].dt.date <= end_date)
+                        ]
+                    else:
+                        filtered = purchases
                 else:
                     # Последний полный период
-                    last_date = purchases["date_dt"].max()
-                    if period == "Месяц":
-                        start_date = last_date - timedelta(days=30)
-                    elif period == "Квартал":
-                        start_date = last_date - timedelta(days=90)
-                    else:  # Год
-                        start_date = last_date - timedelta(days=365)
-                    
-                    filtered = purchases[purchases["date_dt"] >= start_date]
+                    if "date_dt" in purchases.columns and not purchases["date_dt"].empty:
+                        last_date = purchases["date_dt"].max()
+                        if period == "Месяц":
+                            start_date = last_date - timedelta(days=30)
+                        elif period == "Квартал":
+                            start_date = last_date - timedelta(days=90)
+                        else:  # Год
+                            start_date = last_date - timedelta(days=365)
+                        
+                        filtered = purchases[purchases["date_dt"] >= start_date]
+                    else:
+                        filtered = purchases
             
             if filtered.empty:
                 st.warning("Нет данных за выбранный период")
             else:
                 # Основные метрики
-                total_spent = filtered["total"].sum()
-                avg_purchase = filtered["total"].mean()
-                unique_items = filtered["item"].nunique()
-                unique_suppliers = filtered["supplier"].nunique()
+                total_spent = filtered["total"].sum() if "total" in filtered.columns else 0
+                avg_purchase = filtered["total"].mean() if "total" in filtered.columns else 0
+                unique_items = filtered["item"].nunique() if "item" in filtered.columns else 0
+                unique_suppliers = filtered["supplier"].nunique() if "supplier" in filtered.columns else 0
                 
                 col1, col2, col3, col4 = st.columns(4)
                 col1.metric("Всего потрачено", format_currency(total_spent))
@@ -1130,82 +1170,101 @@ def snab_interface():
                 col3.metric("Уникальных товаров", unique_items)
                 col4.metric("Поставщиков", unique_suppliers)
                 
-                # Графики
+                # Графики (упрощенные)
                 tab1, tab2, tab3 = st.tabs(["По категориям", "По времени", "По поставщикам"])
                 
                 with tab1:
                     # Расходы по категориям
-                    cat_data = filtered.groupby("category")["total"].sum().sort_values(ascending=False)
-                    
-                    fig = px.pie(
-                        values=cat_data.values,
-                        names=cat_data.index,
-                        title="Распределение расходов по категориям",
-                        hole=0.3
-                    )
-                    fig.update_traces(textposition='inside', textinfo='percent+label')
-                    st.plotly_chart(fig, use_container_width=True)
-                    
-                    # Таблица по категориям
-                    cat_df = cat_data.reset_index()
-                    cat_df.columns = ["Категория", "Сумма"]
-                    cat_df["Сумма"] = cat_df["Сумма"].apply(format_currency)
-                    cat_df["Доля"] = (cat_data.values / total_spent * 100).round(1).astype(str) + "%"
-                    st.dataframe(cat_df, use_container_width=True, hide_index=True)
+                    if "category" in filtered.columns and "total" in filtered.columns:
+                        cat_data = filtered.groupby("category")["total"].sum().sort_values(ascending=False)
+                        
+                        if not cat_data.empty:
+                            if PLOTLY_AVAILABLE:
+                                fig = px.pie(
+                                    values=cat_data.values,
+                                    names=cat_data.index,
+                                    title="Распределение расходов по категориям",
+                                    hole=0.3
+                                )
+                                fig.update_traces(textposition='inside', textinfo='percent+label')
+                                st.plotly_chart(fig, use_container_width=True)
+                            else:
+                                create_pie_chart(cat_data, "Распределение расходов по категориям")
+                            
+                            # Таблица по категориям
+                            cat_df = cat_data.reset_index()
+                            cat_df.columns = ["Категория", "Сумма"]
+                            cat_df["Сумма"] = cat_df["Сумма"].apply(format_currency)
+                            cat_df["Доля"] = (cat_data.values / total_spent * 100).round(1).astype(str) + "%"
+                            st.dataframe(cat_df, use_container_width=True, hide_index=True)
                 
                 with tab2:
                     # Динамика по дням
-                    daily = filtered.groupby(filtered["date_dt"].dt.date)["total"].sum().reset_index()
-                    daily.columns = ["Дата", "Сумма"]
-                    
-                    fig = px.line(
-                        daily,
-                        x="Дата",
-                        y="Сумма",
-                        title="Динамика расходов",
-                        markers=True
-                    )
-                    fig.update_layout(xaxis_title="Дата", yaxis_title="Сумма, ₸")
-                    st.plotly_chart(fig, use_container_width=True)
+                    if "date_dt" in filtered.columns and "total" in filtered.columns:
+                        daily = filtered.groupby(filtered["date_dt"].dt.date)["total"].sum().reset_index()
+                        daily.columns = ["Дата", "Сумма"]
+                        
+                        if not daily.empty:
+                            if PLOTLY_AVAILABLE:
+                                fig = px.line(
+                                    daily,
+                                    x="Дата",
+                                    y="Сумма",
+                                    title="Динамика расходов",
+                                    markers=True
+                                )
+                                fig.update_layout(xaxis_title="Дата", yaxis_title="Сумма, ₸")
+                                st.plotly_chart(fig, use_container_width=True)
+                            else:
+                                daily.set_index("Дата", inplace=True)
+                                create_bar_chart(daily, "Динамика расходов", "Дата", "Сумма")
                 
                 with tab3:
                     # Расходы по поставщикам
-                    supplier_data = filtered.groupby("supplier")["total"].sum().sort_values(ascending=False)
-                    
-                    fig = px.bar(
-                        x=supplier_data.index,
-                        y=supplier_data.values,
-                        title="Расходы по поставщикам",
-                        labels={"x": "Поставщик", "y": "Сумма, ₸"}
-                    )
-                    fig.update_layout(xaxis_tickangle=-45)
-                    st.plotly_chart(fig, use_container_width=True)
-                    
-                    # Таблица по поставщикам
-                    supplier_df = supplier_data.reset_index()
-                    supplier_df.columns = ["Поставщик", "Сумма"]
-                    supplier_df["Сумма"] = supplier_df["Сумма"].apply(format_currency)
-                    supplier_df["Доля"] = (supplier_data.values / total_spent * 100).round(1).astype(str) + "%"
-                    st.dataframe(supplier_df, use_container_width=True, hide_index=True)
+                    if "supplier" in filtered.columns and "total" in filtered.columns:
+                        supplier_data = filtered.groupby("supplier")["total"].sum().sort_values(ascending=False)
+                        
+                        if not supplier_data.empty:
+                            if PLOTLY_AVAILABLE:
+                                fig = px.bar(
+                                    x=supplier_data.index,
+                                    y=supplier_data.values,
+                                    title="Расходы по поставщикам",
+                                    labels={"x": "Поставщик", "y": "Сумма, ₸"}
+                                )
+                                fig.update_layout(xaxis_tickangle=-45)
+                                st.plotly_chart(fig, use_container_width=True)
+                            else:
+                                create_bar_chart(supplier_data, "Расходы по поставщикам", "Поставщик", "Сумма")
+                            
+                            # Таблица по поставщикам
+                            supplier_df = supplier_data.reset_index()
+                            supplier_df.columns = ["Поставщик", "Сумма"]
+                            supplier_df["Сумма"] = supplier_df["Сумма"].apply(format_currency)
+                            supplier_df["Доля"] = (supplier_data.values / total_spent * 100).round(1).astype(str) + "%"
+                            st.dataframe(supplier_df, use_container_width=True, hide_index=True)
                 
                 # Топ-10 закупок
                 st.subheader("🏆 Топ-10 самых дорогих закупок")
-                top10 = filtered.nlargest(10, "total")[
-                    ["date", "item", "category", "supplier", "qty", "unit", "price", "total"]
-                ].copy()
-                top10["total"] = top10["total"].apply(format_currency)
-                top10["price"] = top10["price"].apply(format_currency)
-                top10 = top10.rename(columns={
-                    "date": "Дата",
-                    "item": "Товар",
-                    "category": "Категория",
-                    "supplier": "Поставщик",
-                    "qty": "Кол-во",
-                    "unit": "Ед.изм",
-                    "price": "Цена",
-                    "total": "Сумма"
-                })
-                st.dataframe(top10, use_container_width=True, hide_index=True)
+                if "total" in filtered.columns:
+                    top10 = filtered.nlargest(10, "total")[
+                        ["date", "item", "category", "supplier", "qty", "unit", "price", "total"]
+                    ].copy() if all(col in filtered.columns for col in ["date", "item", "category", "supplier", "qty", "unit", "price"]) else pd.DataFrame()
+                    
+                    if not top10.empty:
+                        top10["total"] = top10["total"].apply(format_currency)
+                        top10["price"] = top10["price"].apply(format_currency)
+                        top10 = top10.rename(columns={
+                            "date": "Дата",
+                            "item": "Товар",
+                            "category": "Категория",
+                            "supplier": "Поставщик",
+                            "qty": "Кол-во",
+                            "unit": "Ед.изм",
+                            "price": "Цена",
+                            "total": "Сумма"
+                        })
+                        st.dataframe(top10, use_container_width=True, hide_index=True)
     
     with t6:
         st.subheader("Чеки и документы")
@@ -1253,87 +1312,6 @@ def snab_interface():
                                     key=f"download_{file.name}",
                                     use_container_width=True
                                 )
-    
-    with t7:
-        st.subheader("Генерация отчетов")
-        
-        report_type = st.selectbox(
-            "Тип отчета",
-            ["Расходы по категориям", "Остатки на складе", "Движение товаров", "Эффективность закупок"]
-        )
-        
-        if report_type == "Расходы по категориям":
-            if not purchases.empty:
-                # Подготовка данных
-                purchases["month"] = pd.to_datetime(purchases["date"]).dt.to_period("M")
-                monthly_cat = purchases.groupby(["month", "category"])["total"].sum().unstack(fill_value=0)
-                
-                fig = px.area(
-                    monthly_cat,
-                    title="Динамика расходов по категориям",
-                    labels={"value": "Сумма, ₸", "month": "Месяц"}
-                )
-                st.plotly_chart(fig, use_container_width=True)
-        
-        elif report_type == "Остатки на складе":
-            if not stock.empty:
-                # Текущие остатки
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    # Круговая диаграмма по категориям
-                    cat_stock = stock.groupby("category")["quantity"].sum()
-                    fig = px.pie(
-                        values=cat_stock.values,
-                        names=cat_stock.index,
-                        title="Распределение запасов по категориям"
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
-                
-                with col2:
-                    # Товары с минимальным остатком
-                    critical = stock[stock["quantity"] <= stock["min_qty"]].nlargest(10, "quantity")
-                    if not critical.empty:
-                        fig = px.bar(
-                            critical,
-                            x="item",
-                            y="quantity",
-                            title="Товары с критическим остатком",
-                            labels={"quantity": "Остаток", "item": "Товар"}
-                        )
-                        st.plotly_chart(fig, use_container_width=True)
-        
-        elif report_type == "Движение товаров":
-            if not purchases.empty:
-                # Частота закупок
-                freq = purchases.groupby("item").size().sort_values(ascending=False).head(20)
-                
-                fig = px.bar(
-                    x=freq.index,
-                    y=freq.values,
-                    title="Топ-20 часто закупаемых товаров",
-                    labels={"x": "Товар", "y": "Количество закупок"}
-                )
-                fig.update_layout(xaxis_tickangle=-45)
-                st.plotly_chart(fig, use_container_width=True)
-        
-        elif report_type == "Эффективность закупок":
-            if not purchases.empty:
-                # Средняя цена по товарам
-                avg_price = purchases.groupby("item")["price"].agg(["mean", "min", "max"]).round(2)
-                avg_price.columns = ["Средняя", "Мин.", "Макс."]
-                avg_price = avg_price.sort_values("Средняя", ascending=False).head(20)
-                
-                st.subheader("Топ-20 товаров по средней цене")
-                avg_price["Средняя"] = avg_price["Средняя"].apply(format_currency)
-                avg_price["Мин."] = avg_price["Мин."].apply(format_currency)
-                avg_price["Макс."] = avg_price["Макс."].apply(format_currency)
-                st.dataframe(avg_price, use_container_width=True)
-        
-        # Кнопка экспорта
-        if st.button("📥 Сгенерировать и скачать отчет", type="primary", use_container_width=True):
-            # Здесь можно реализовать создание PDF/Excel отчета
-            st.info("Функция генерации отчетов в разработке")
 
 # ===================== АДМИН =====================
 def admin_interface():
@@ -1359,24 +1337,29 @@ def admin_interface():
         with col2:
             st.metric("Позиций на складе", len(stock))
         with col3:
-            st.metric("Активных заявок", len(orders[orders["status"] == "new"]))
+            active_orders = len(orders[orders["status"] == "new"]) if not orders.empty else 0
+            st.metric("Активных заявок", active_orders)
         with col4:
-            total_files = len(list(Path(PHOTO_DIR).glob("*")))
+            total_files = len(list(Path(PHOTO_DIR).glob("*"))) if os.path.exists(PHOTO_DIR) else 0
             st.metric("Файлов чеков", total_files)
         
         # Детальная статистика
-        if not purchases.empty:
+        if not purchases.empty and "date" in purchases.columns:
             purchases["date_dt"] = pd.to_datetime(purchases["date"])
             st.subheader("Динамика закупок")
             
             monthly = purchases.groupby(purchases["date_dt"].dt.to_period("M"))["total"].sum()
-            fig = px.line(
-                x=monthly.index.astype(str),
-                y=monthly.values,
-                title="Ежемесячные расходы",
-                labels={"x": "Месяц", "y": "Сумма, ₸"}
-            )
-            st.plotly_chart(fig, use_container_width=True)
+            
+            if PLOTLY_AVAILABLE:
+                fig = px.line(
+                    x=monthly.index.astype(str),
+                    y=monthly.values,
+                    title="Ежемесячные расходы",
+                    labels={"x": "Месяц", "y": "Сумма, ₸"}
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                create_bar_chart(monthly, "Ежемесячные расходы", "Месяц", "Сумма")
     
     with atabs[1]:
         st.subheader("Редактирование таблиц")

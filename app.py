@@ -1,17 +1,16 @@
 import streamlit as st
-import sqlite3
 import pandas as pd
 import os
 import base64
 from datetime import datetime, date
 from pathlib import Path
+import sqlalchemy as sa  # Новый импорт для Supabase
+from sqlalchemy import create_engine, text  # Новый импорт
 
 # ===================== КОНФИГ =====================
 st.set_page_config(page_title="OLYMPUS", page_icon="mountain", layout="wide", initial_sidebar_state="expanded")
-DB_FILE = "olympus.db"
 PHOTO_DIR = "чеки"
 os.makedirs(PHOTO_DIR, exist_ok=True)
-
 # ===================== КРАСИВЫЕ СТИЛИ =====================
 st.markdown("""
 <style>
@@ -130,7 +129,6 @@ st.markdown("""
     });
 </script>
 """, unsafe_allow_html=True)
-
 # ===================== РУССКИЕ ЗАГОЛОВКИ =====================
 def rus(df, kind):
     if df.empty: return df
@@ -148,34 +146,22 @@ def rus(df, kind):
     m = maps.get(kind, {"rename":{}, "order":[]})
     df = df.rename(columns=m["rename"])
     return df[[c for c in m["order"] if c in df.columns]]
-
 # ===================== БАЗА =====================
-def init_db():
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS purchases (
-        id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT, item TEXT, category TEXT, qty REAL, unit TEXT,
-        price REAL, total REAL, supplier TEXT, comment TEXT, photo TEXT, added_by TEXT)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS stock (
-        item TEXT PRIMARY KEY, category TEXT, unit TEXT, quantity REAL DEFAULT 0, min_qty REAL DEFAULT 5)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS orders (
-        id INTEGER PRIMARY KEY AUTOINCREMENT, item TEXT, qty REAL, unit TEXT, comment TEXT,
-        ordered_by TEXT, ordered_at TEXT, status TEXT DEFAULT 'new')''')
-    conn.commit()
-    conn.close()
+@st.cache_resource  # Кэшируем двигатель для скорости и экономии соединений
+def get_engine():
+    return create_engine(st.secrets["db_url"])
 
 def get_raw(table):
-    conn = sqlite3.connect(DB_FILE)
-    df = pd.read_sql(f"SELECT * FROM {table}", conn)
-    conn.close()
+    engine = get_engine()
+    with engine.connect() as conn:
+        df = pd.read_sql(f"SELECT * FROM {table}", conn)
     return df
 
 def save_raw(table, df):
-    conn = sqlite3.connect(DB_FILE)
-    df.to_sql(table, conn, if_exists="replace", index=False)
-    conn.close()
-
-init_db()
+    engine = get_engine()
+    with engine.connect() as conn:
+        df.to_sql(table, conn, if_exists="replace", index=False)
+        conn.commit()  # Обязательно для сохранения изменений
 
 # ===================== СИНХРОНИЗАЦИЯ ДАННЫХ =====================
 def load_fresh_data():
@@ -184,20 +170,16 @@ def load_fresh_data():
         "stock": get_raw("stock"),
         "orders": get_raw("orders")
     }
-
 if "data" not in st.session_state:
     load_fresh_data()
 load_fresh_data()
-
 purchases = st.session_state.data["purchases"]
 stock = st.session_state.data["stock"]
 orders = st.session_state.data["orders"]
-
 # ===================== ЛОГО С GITHUB =====================
 # ←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←
 # ЗАМЕНИ ЭТУ ССЫЛКУ НА СВОЮ (кнопка Raw в GitHub)
-LOGO_URL = "https://github.com/asidorevich/my_homework_repo/blob/main/logo.PNG?raw=true"  # ← твоя ссылка
-
+LOGO_URL = "https://github.com/asidorevich/my_homework_repo/blob/main/logo.PNG?raw=true" # ← твоя ссылка
 st.markdown(f"""
 <div style="text-align:center; padding:30px 0 20px;">
     <img src="{LOGO_URL}" width="100"
@@ -206,11 +188,9 @@ st.markdown(f"""
     <p style="font-size:1.3rem; color:#ff8c42; letter-spacing:4px; margin:5px 0 0 0; opacity:0.9;">2026</p>
 </div>
 """, unsafe_allow_html=True)
-
 # ===================== АВТОРИЗАЦИЯ =====================
 if "role" not in st.session_state:
     st.session_state.role = None
-
 if st.session_state.role is None:
     c1, c2, c3 = st.columns([1,2,1])
     with c2:
@@ -225,14 +205,12 @@ if st.session_state.role is None:
             else:
                 st.error("Неверный пароль")
     st.stop()
-
 # ===================== САЙДБАР =====================
 total = purchases["total"].sum() if not purchases.empty and "total" in purchases.columns else 0
 st.sidebar.metric("Всего потрачено", f"{total:,.0f} ₸")
 if st.sidebar.button("Выйти"):
     st.session_state.role = None
     st.rerun()
-
 # ===================== МЕДСЕСТРА =====================
 if st.session_state.role == "med":
     t1, t2, t3 = st.tabs(["Остатки", "Списание", "Заказать"])
@@ -305,7 +283,6 @@ if st.session_state.role == "med":
                     st.success("Заявка отправлена!")
                     st.balloons()
                     st.rerun()
-
 # ===================== СНАБЖЕНИЕ =====================
 else:
     t1,t2,t3,t4,t5,t6 = st.tabs(["Заявки","Закупка","История","Склад","Аналитика","Чеки"])
@@ -495,5 +472,4 @@ else:
                 else:
                     with open(f, "rb") as pdf_file:
                         st.download_button("Скачать", pdf_file.read(), file_name=f.name, key=str(f))
-
 st.markdown("<div style='text-align:center; padding:100px 0 30px; color:#888; font-size:1rem;'>© 2026 КДЛ OLYMPUS • GOD MODE 2026</div>", unsafe_allow_html=True)

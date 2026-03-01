@@ -10,34 +10,74 @@ import sqlalchemy as sa
 from sqlalchemy import create_engine, text
 
 # ===================== КОНФИГ =====================
-st.set_page_config(page_title="OLYMPUS 2026", page_icon="🏔️", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(
+    page_title="OLYMPUS 2026",
+    page_icon="🏔️",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
 PHOTO_DIR = "чеки"
 os.makedirs(PHOTO_DIR, exist_ok=True)
 
-# ===================== СВЕТЛЫЕ ПРЕМИУМ СТИЛИ =====================
+# ===================== КРУПНЫЕ ТАБЫ + МОБИЛЬНАЯ АДАПТАЦИЯ =====================
 st.markdown("""
 <style>
     .main, .stApp {background: linear-gradient(135deg, #f8faff 0%, #e6f3ff 100%); color: #1a2a44;}
     html, body, [class*="css"] {font-size: 19px !important;}
-    .stDataFrame, .stDataEditor, .stDataFrame table, .stDataEditor table {
-        font-size: 20px !important; background: white !important; border-radius: 20px !important;
-        box-shadow: 0 10px 40px rgba(0,0,0,0.08) !important;
+
+    /* КРУПНЫЕ ТАБЫ */
+    div[data-testid="stTabs"] > div[role="tablist"] {
+        gap: 20px !important;
+        justify-content: center;
+        flex-wrap: wrap;
     }
+    div[data-testid="stTabs"] button {
+        font-size: 1.75rem !important;
+        font-weight: 700 !important;
+        padding: 22px 40px !important;
+        border-radius: 22px !important;
+        min-width: 170px;
+        box-shadow: 0 8px 25px rgba(0,0,0,0.1);
+        transition: all 0.3s ease;
+    }
+    div[data-testid="stTabs"] button:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 15px 35px rgba(255,140,66,0.3);
+    }
+    div[data-testid="stTabs"] button[data-state="active"] {
+        background: linear-gradient(45deg, #ff8c42, #00d4ff) !important;
+        color: white !important;
+        transform: scale(1.05);
+    }
+
+    /* МОБИЛЬНАЯ ВЕРСИЯ */
+    @media (max-width: 768px) {
+        div[data-testid="stTabs"] button {
+            font-size: 1.55rem !important;
+            padding: 18px 26px !important;
+            min-width: 140px;
+        }
+        .stButton>button {
+            font-size: 1.45rem !important;
+            padding: 18px 32px !important;
+        }
+        h1 {font-size: 2.9rem !important;}
+        .metric-card {padding: 18px !important;}
+    }
+
     .metric-card {
-        background: white; border-radius: 20px; padding: 22px; border-left: 7px solid #ff8c42;
-        box-shadow: 0 10px 30px rgba(0,0,0,0.07); margin: 12px 0;
+        background: white; border-radius: 20px; padding: 22px;
+        border-left: 7px solid #ff8c42; box-shadow: 0 10px 30px rgba(0,0,0,0.07);
+        margin: 12px 0;
     }
-    .low-stock {border-left-color: #ef4444 !important;}
-    .warning-stock {border-left-color: #eab308 !important;}
     .stButton>button {
         background: linear-gradient(45deg, #ff8c42, #00d4ff) !important;
-        color: white !important; border-radius: 18px !important; padding: 16px 42px !important;
-        font-weight: 700 !important; font-size: 1.35rem !important;
-        box-shadow: 0 8px 25px rgba(255,140,66,0.4); transition: all 0.3s ease;
+        color: white !important; border-radius: 18px !important;
+        font-weight: 700 !important; font-size: 1.4rem !important;
+        box-shadow: 0 8px 25px rgba(255,140,66,0.4);
     }
-    .stButton>button:hover {transform: translateY(-4px); box-shadow: 0 15px 35px rgba(255,140,66,0.5);}
-    h1,h2,h3,h4,h5 {background: linear-gradient(90deg, #ff8c42, #00d4ff);
+    h1,h2,h3,h4 {background: linear-gradient(90deg, #ff8c42, #00d4ff);
         -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: 900;}
     .stSidebar {background: linear-gradient(180deg, #ffffff, #f0f7ff) !important;}
 </style>
@@ -97,10 +137,10 @@ def rus(df, kind):
 # ===================== ЛОГО =====================
 LOGO_URL = "https://github.com/asidorevich/my_homework_repo/blob/main/logo.PNG?raw=true"
 st.markdown(f"""
-<div style="text-align:center; padding:30px 0 20px;">
-    <img src="{LOGO_URL}" width="120" style="border-radius:50%; border:6px solid #fff; box-shadow: 0 0 40px rgba(0,212,255,0.4);">
-    <h1 style="font-size:4.2rem; margin:15px 0 0 0;">OLYMPUS</h1>
-    <p style="font-size:1.45rem; color:#ff8c42; letter-spacing:6px;">2026</p>
+<div style="text-align:center; padding:25px 0 15px;">
+    <img src="{LOGO_URL}" width="125" style="border-radius:50%; border:6px solid #fff; box-shadow: 0 0 40px rgba(0,212,255,0.4);">
+    <h1 style="font-size:4.1rem; margin:12px 0 0 0;">OLYMPUS</h1>
+    <p style="font-size:1.4rem; color:#ff8c42; letter-spacing:5px;">2026</p>
 </div>
 """, unsafe_allow_html=True)
 
@@ -181,10 +221,9 @@ if st.session_state.role == "med":
                 else:
                     stock.loc[stock["item"] == item, "quantity"] -= qty
                     save_raw("stock", stock)
-                    new = pd.DataFrame([{"date": date.today().strftime("%Y-%m-%d"),
-                                         "item": f"[СПИСАНО] {item}", "category": "Списание",
-                                         "qty": qty, "unit": unit, "price": 0, "total": 0,
-                                         "supplier": "", "comment": com, "photo": "", "added_by": "Медсестра"}])
+                    new = pd.DataFrame([{"date": date.today().strftime("%Y-%m-%d"), "item": f"[СПИСАНО] {item}",
+                                         "category": "Списание", "qty": qty, "unit": unit,
+                                         "price": 0, "total": 0, "supplier": "", "comment": com, "photo": "", "added_by": "Медсестра"}])
                     save_raw("purchases", pd.concat([purchases, new], ignore_index=True))
                     load_all_data(force=True)
                     st.toast(f"✅ Списано {qty} × {item}", icon="🗑️")
@@ -342,7 +381,6 @@ elif st.session_state.role == "snab":
         with col2:
             cat_df = cat_df.rename(columns={"category": "Категория", "total": "Сумма"})
             st.dataframe(cat_df[["Категория", "Сумма", "Доля"]], use_container_width=True, hide_index=True)
-        # (остальная аналитика — топ-10, поставщики, детальная таблица — полностью как в твоём оригинале)
         st.subheader("Топ-10 самых дорогих закупок")
         top10 = month_data.groupby(["item", "category", "supplier", "price"], as_index=False)["total"].sum()
         top10 = top10.sort_values("total", ascending=False).head(10)
@@ -455,7 +493,7 @@ else:
                 st.rerun()
 
 st.markdown("""
-<div style='text-align:center; padding:80px 0 30px; color:#64748b; font-size:1rem;'>
+<div style='text-align:center; padding:60px 0 30px; color:#64748b; font-size:1rem;'>
     © 2026 КДЛ OLYMPUS • GOD MODE ACTIVATED
 </div>
 """, unsafe_allow_html=True)

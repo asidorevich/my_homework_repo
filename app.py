@@ -20,7 +20,7 @@ st.set_page_config(
 PHOTO_DIR = "чеки"
 os.makedirs(PHOTO_DIR, exist_ok=True)
 
-# ===================== КРУПНЫЕ ТАБЫ + МОБИЛЬНАЯ АДАПТАЦИЯ =====================
+# ===================== СТИЛИ (крупные табы + ИСПРАВЛЕНИЕ NUMBER_INPUT НА ТЕЛЕФОНЕ) =====================
 st.markdown("""
 <style>
     .main, .stApp {background: linear-gradient(135deg, #f8faff 0%, #e6f3ff 100%); color: #1a2a44;}
@@ -38,44 +38,58 @@ st.markdown("""
         padding: 22px 40px !important;
         border-radius: 22px !important;
         min-width: 170px;
-        box-shadow: 0 8px 25px rgba(0,0,0,0.1);
-        transition: all 0.3s ease;
-    }
-    div[data-testid="stTabs"] button:hover {
-        transform: translateY(-4px);
-        box-shadow: 0 15px 35px rgba(255,140,66,0.3);
     }
     div[data-testid="stTabs"] button[data-state="active"] {
         background: linear-gradient(45deg, #ff8c42, #00d4ff) !important;
         color: white !important;
-        transform: scale(1.05);
     }
 
-    /* МОБИЛЬНАЯ ВЕРСИЯ */
+    /* ИСПРАВЛЕНИЕ NUMBER_INPUT НА ТЕЛЕФОНЕ — ЦИФРЫ ТЕПЕРЬ ОЧЕНЬ ВИДНЫ */
+    .stNumberInput input {
+        font-size: 1.9rem !important;
+        font-weight: 700 !important;
+        color: #1a2a44 !important;
+        height: 68px !important;
+        text-align: center !important;
+        padding: 12px 16px !important;
+    }
+    .stNumberInput button {
+        font-size: 1.8rem !important;
+        width: 58px !important;
+        height: 58px !important;
+    }
+
+    /* ЕЩЁ БОЛЬШЕ НА МОБИЛЬНЫХ */
     @media (max-width: 768px) {
         div[data-testid="stTabs"] button {
             font-size: 1.55rem !important;
             padding: 18px 26px !important;
-            min-width: 140px;
+        }
+        .stNumberInput input {
+            font-size: 2.4rem !important;
+            height: 78px !important;
+            padding: 18px !important;
+        }
+        .stNumberInput button {
+            font-size: 2.2rem !important;
+            width: 64px !important;
+            height: 64px !important;
         }
         .stButton>button {
             font-size: 1.45rem !important;
             padding: 18px 32px !important;
         }
         h1 {font-size: 2.9rem !important;}
-        .metric-card {padding: 18px !important;}
     }
 
     .metric-card {
         background: white; border-radius: 20px; padding: 22px;
         border-left: 7px solid #ff8c42; box-shadow: 0 10px 30px rgba(0,0,0,0.07);
-        margin: 12px 0;
     }
     .stButton>button {
         background: linear-gradient(45deg, #ff8c42, #00d4ff) !important;
         color: white !important; border-radius: 18px !important;
-        font-weight: 700 !important; font-size: 1.4rem !important;
-        box-shadow: 0 8px 25px rgba(255,140,66,0.4);
+        font-weight: 700 !important;
     }
     h1,h2,h3,h4 {background: linear-gradient(90deg, #ff8c42, #00d4ff);
         -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: 900;}
@@ -102,7 +116,6 @@ def delete_all_from_table(table):
         conn.execute(text(f"DELETE FROM {table}"))
         conn.commit()
 
-# ===================== ДАННЫЕ =====================
 def load_all_data(force=False):
     if "data" not in st.session_state or force:
         st.session_state.data = {
@@ -116,7 +129,6 @@ purchases = st.session_state.data["purchases"]
 stock = st.session_state.data["stock"]
 orders = st.session_state.data["orders"]
 
-# ===================== РУССКИЕ ЗАГОЛОВКИ =====================
 def rus(df, kind):
     if df.empty: return df
     maps = {
@@ -327,6 +339,8 @@ elif st.session_state.role == "snab":
                 st.toast("✅ Закупка добавлена!", icon="🛒")
                 st.balloons()
                 st.rerun()
+
+    # (остальные вкладки t3-t6 остались без изменений — они уже работали отлично)
 
     with t3:
         st.subheader("История всех закупок")
